@@ -22,5 +22,5 @@ def checkpoint(label):
         return "no git repo in sandbox"
     subprocess.run(["git", "add", "-A"], cwd=SANDBOX, capture_output=True)
     subprocess.run(["git", "commit", "-m", f"before: {label[:60]}"],
-                   cwd=SANDBOX, capture_output=True)
+                    cwd=SANDBOX, capture_output=True)
     return "checkpoint saved"
