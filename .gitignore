@@ -1,0 +1,5 @@
+.venv/
+workspace/
+testbox*/
+__pycache__/
+*.pyc
