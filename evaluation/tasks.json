@@ -1,0 +1,8 @@
+[
+{
+    "id": "E1",
+    "difficulty": "easy",
+    "prompt": "Add a docstring to every function in main.py",
+    "verify": "python3 -c \"import main; assert main.add.__doc__ or open('main.py').read().count(chr(34)*3) >= 2\""
+}
+]

@@ -4,7 +4,27 @@ import os
 import re
 import subprocess
 
-SANDBOX = os.path.abspath(os.environ.get("VA_SANDBOX", "./workspace"))
+# Default sandbox lives next to this file, not relative to wherever the
+# shell happens to be cwd'd — so `python cli.py` works the same from any
+# directory. Always ensured to exist so tools that shell out (run_command)
+# never fail just because nothing has been written yet.
+_DEFAULT_SANDBOX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace")
+SANDBOX = os.path.abspath(os.environ.get("VA_SANDBOX", _DEFAULT_SANDBOX))
+os.makedirs(SANDBOX, exist_ok=True)
+
+
+def set_sandbox(path):
+    """Point the agent at a different directory (e.g. an existing codebase)
+    for the rest of the process. Every tool below reads the SANDBOX global
+    fresh on each call, so this takes effect immediately — but modules that
+    did `from tools import SANDBOX` captured the old value at import time
+    and must read `tools.SANDBOX` instead to see the change (see safety.py,
+    cli.py)."""
+    global SANDBOX
+    SANDBOX = os.path.abspath(path)
+    os.makedirs(SANDBOX, exist_ok=True)
+
+
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv"}
 BLOCKED = ["rm -rf", "sudo", "shutdown", "mkfs", "dd if=", ":(){", "> /dev/"]
 
