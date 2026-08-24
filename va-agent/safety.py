@@ -13,7 +13,8 @@ AUTO_APPROVE = os.environ.get("VA_AUTO_APPROVE") == "1"
 def approve(name, arguments):
     if name not in NEEDS_APPROVAL or AUTO_APPROVE:
         return True
-    console.print(f"\n  [yellow]>>> {name}:[/yellow] {describe_call(name, arguments)}")
+    console.print(f"\n  [yellow]⚠ about to run[/yellow] [bold]{name}[/bold]"
+                  f"([yellow]{describe_call(name, arguments)}[/yellow])")
     answer = console.input("  [bold]Allow? [y/N][/bold] ").strip().lower()
     return answer in {"y", "yes"}
 
