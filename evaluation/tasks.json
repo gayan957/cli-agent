@@ -1,8 +1,81 @@
 [
-{
-    "id": "E1",
-    "difficulty": "easy",
-    "prompt": "Add a docstring to every function in main.py",
-    "verify": "python3 -c \"import main; assert main.add.__doc__ or open('main.py').read().count(chr(34)*3) >= 2\""
-}
+  {"id": "E1", "difficulty": "easy", "files": 1,
+   "prompt": "Add a docstring to every public function in notes/search.py that doesn't already have one.",
+   "verify": "python3 -c \"import notes.search as s; assert all(getattr(s,f).__doc__ for f in ['by_text','by_tag','sort_notes','all_tags'])\""},
+
+  {"id": "E2", "difficulty": "easy", "files": 1,
+   "prompt": "Add a method called `is_empty` to the Note class in notes/models.py that returns True when the body is blank or only whitespace.",
+   "verify": "python3 -c \"from notes.models import Note; assert Note(id=1,title='x',body='  ').is_empty(); assert not Note(id=1,title='x',body='a').is_empty()\""},
+
+  {"id": "E3", "difficulty": "easy", "files": 1,
+   "prompt": "In notes/storage.py, add a method `titles()` to NoteStore that returns a list of all note titles.",
+   "verify": "python3 -c \"from notes.storage import NoteStore; import tempfile,os; p=os.path.join(tempfile.mkdtemp(),'n.json'); s=NoteStore(p); s.add('A'); s.add('B'); assert s.titles()==['A','B']\""},
+
+  {"id": "E4", "difficulty": "easy", "files": 1,
+   "prompt": "Add a function `count_by_tag(notes)` to notes/search.py that returns a dict mapping each lowercase tag to how many notes carry it.",
+   "verify": "python3 -c \"from notes.search import count_by_tag; from notes.models import Note; n=[Note(id=1,title='a',tags=['x']),Note(id=2,title='b',tags=['X','y'])]; assert count_by_tag(n)=={'x':2,'y':1}\""},
+
+  {"id": "E5", "difficulty": "easy", "files": 1,
+   "prompt": "The README is missing a section about running the tests with coverage. Add one under the Tests heading.",
+   "verify": "python3 -c \"assert 'coverage' in open('README.md').read().lower()\""},
+
+  {"id": "E6", "difficulty": "easy", "files": 1,
+   "prompt": "Add a `--limit` option to the `list` command in notes/cli.py that shows at most N notes.",
+   "verify": "python3 -c \"from notes.cli import build_parser; a=build_parser().parse_args(['list','--limit','5']); assert a.limit==5\""},
+
+  {"id": "E7", "difficulty": "easy", "files": 1,
+   "prompt": "Add a function `longest_note(notes)` to notes/search.py returning the note with the longest body, or None for an empty list.",
+   "verify": "python3 -c \"from notes.search import longest_note; from notes.models import Note; assert longest_note([])is None; assert longest_note([Note(id=1,title='a',body='x'),Note(id=2,title='b',body='xxx')]).id==2\""},
+
+  {"id": "M1", "difficulty": "medium", "files": 1,
+   "prompt": "parse_date in notes/formatting.py crashes on empty or malformed input. Make it return an empty string instead of raising, and add a test for it in tests/test_formatting.py.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.formatting import parse_date; assert parse_date('')==''; assert parse_date(None)==''\""},
+
+  {"id": "M2", "difficulty": "medium", "files": 1,
+   "prompt": "Add an `update` method to NoteStore in notes/storage.py that takes a note id plus optional title, body and tags, updates only the fields given, saves, and returns the updated note or None if not found.",
+   "verify": "python3 -c \"from notes.storage import NoteStore; import tempfile,os; p=os.path.join(tempfile.mkdtemp(),'n.json'); s=NoteStore(p); s.add('A','b'); n=s.update(1,title='Z'); assert n.title=='Z' and n.body=='b'; assert s.update(99) is None\""},
+
+  {"id": "M3", "difficulty": "medium", "files": 2,
+   "prompt": "Add tag filtering to the search command in notes/cli.py via a --tag option, so results are filtered by both query and tag. Add a test for the parser in tests/.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.cli import build_parser; a=build_parser().parse_args(['search','x','--tag','work']); assert a.tag=='work'\""},
+
+  {"id": "M4", "difficulty": "medium", "files": 1,
+   "prompt": "sort_notes in notes/search.py silently falls back to created for unknown keys. Make it raise ValueError with a helpful message instead, and add a test.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.search import sort_notes; import pytest; pytest.raises(ValueError, sort_notes, [], 'bogus')\""},
+
+  {"id": "M5", "difficulty": "medium", "files": 2,
+   "prompt": "Add a `stats` command to the CLI that prints the total note count and the number of distinct tags. Add a test.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.cli import build_parser; build_parser().parse_args(['stats'])\""},
+
+  {"id": "M6", "difficulty": "medium", "files": 1,
+   "prompt": "NoteStore.load crashes if the JSON file is corrupt. Make it raise a clear ValueError naming the file path, and add a test.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.storage import NoteStore; import tempfile,os,pytest; p=os.path.join(tempfile.mkdtemp(),'bad.json'); open(p,'w').write('{{{'); pytest.raises(ValueError, NoteStore(p).load)\""},
+
+  {"id": "M7", "difficulty": "medium", "files": 1,
+   "prompt": "Add an `archived` boolean field to the Note dataclass, defaulting to False, making sure to_dict and from_dict handle it and old files without the field still load.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.models import Note; assert Note(id=1,title='x').archived is False; assert Note.from_dict({'id':1,'title':'x'}).archived is False\""},
+
+  {"id": "H1", "difficulty": "hard", "files": 3,
+   "prompt": "Add pagination to listing: a `paginate(notes, page, per_page)` function in notes/search.py, --page and --per-page options on the list command, and tests. Pages are 1-indexed.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.search import paginate; from notes.models import Note; n=[Note(id=i,title=str(i)) for i in range(1,11)]; assert [x.id for x in paginate(n,2,3)]==[4,5,6]\""},
+
+  {"id": "H2", "difficulty": "hard", "files": 3,
+   "prompt": "Add archive support end to end: an `archive` CLI command, a store method to set the archived flag, exclude archived notes from list by default with a --all flag to include them, plus tests.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.cli import build_parser; build_parser().parse_args(['archive','1']); a=build_parser().parse_args(['list','--all']); assert a.all\""},
+
+  {"id": "H3", "difficulty": "hard", "files": 2,
+   "prompt": "Rename the `all()` method on NoteStore to `list_notes()` everywhere it is used across the whole project, keeping all tests passing.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.storage import NoteStore; assert hasattr(NoteStore,'list_notes')\" && ! grep -rn '\\.all()' notes/"},
+
+  {"id": "H4", "difficulty": "hard", "files": 2,
+   "prompt": "Add CSV export: an `export_csv(notes)` function in notes/formatting.py returning CSV text with a header row, an `export` CLI command, and tests.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.formatting import export_csv; from notes.models import Note; out=export_csv([Note(id=1,title='a,b')]); assert 'id' in out.splitlines()[0]; assert '\\\"a,b\\\"' in out\""},
+
+  {"id": "H5", "difficulty": "hard", "files": 2,
+   "prompt": "The search is case-insensitive for text but by_tag compares lowercased every call, which is slow. Add a cached `tags_lower` property on Note and use it in by_tag and all_tags, keeping behaviour identical.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.models import Note; assert Note(id=1,title='x',tags=['A']).tags_lower==['a']\""},
+
+  {"id": "H6", "difficulty": "hard", "files": 3,
+   "prompt": "Add a `merge(other_store)` method to NoteStore that copies notes from another store, reassigning ids to avoid clashes and skipping exact duplicates by title and body. Add tests.",
+   "verify": "python3 -m pytest -q && python3 -c \"from notes.storage import NoteStore; import tempfile,os; d=tempfile.mkdtemp(); a=NoteStore(os.path.join(d,'a.json')); b=NoteStore(os.path.join(d,'b.json')); a.add('X'); b.add('Y'); a.merge(b); assert a.count()==2\""}
 ]
