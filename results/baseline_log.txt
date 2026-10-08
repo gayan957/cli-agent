@@ -1,0 +1,65 @@
+
+=== E1 run 1 ===
+    success=0 steps=4 failures=0 time=30.9s
+
+=== E1 run 2 ===
+    success=2 steps=3 failures=0 time=22.9s
+
+=== E1 run 3 ===
+    success=2 steps=2 failures=0 time=2.7s
+
+=== E2 run 1 ===
+    success=0 steps=2 failures=0 time=23.3s
+
+=== E2 run 2 ===
+    success=0 steps=3 failures=0 time=62.3s
+
+=== E2 run 3 ===
+    success=0 steps=3 failures=0 time=47.2s
+
+=== E3 run 1 ===
+    success=0 steps=3 failures=0 time=47.2s
+
+=== E3 run 2 ===
+    success=0 steps=2 failures=0 time=44.6s
+
+=== E3 run 3 ===
+    success=0 steps=2 failures=0 time=6.3s
+
+=== E4 run 1 ===
+    success=2 steps=4 failures=0 time=30.0s
+
+=== E4 run 2 ===
+    success=0 steps=4 failures=0 time=51.2s
+
+=== E4 run 3 ===
+    success=0 steps=3 failures=0 time=45.0s
+
+=== E5 run 1 ===
+    success=2 steps=4 failures=0 time=26.4s
+
+=== E5 run 2 ===
+    success=0 steps=4 failures=0 time=11.1s
+
+=== E5 run 3 ===
+    success=2 steps=5 failures=0 time=30.2s
+
+=== E6 run 1 ===
+    success=0 steps=2 failures=0 time=24.3s
+
+=== E6 run 2 ===
+    success=0 steps=2 failures=0 time=47.1s
+
+=== E6 run 3 ===
+    success=0 steps=3 failures=0 time=59.2s
+
+=== E7 run 1 ===
+    success=0 steps=3 failures=0 time=11.6s
+
+=== E7 run 2 ===
+    success=0 steps=3 failures=0 time=19.3s
+
+=== E7 run 3 ===
+    success=0 steps=2 failures=0 time=47.3s
+
+=== M1 run 1 ===

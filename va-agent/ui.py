@@ -108,9 +108,13 @@ def summary(stats):
     ok = stats["tool_failures"] == 0
     fail_style = "green" if ok else "red"
     fail_icon = "✓" if ok else "✗"
+    # Colour by `finished` too — a run that hit the step limit with no tool
+    # failures is still unfinished and must not read as a green success.
+    colour = "green" if stats.get("finished") and ok else "yellow"
     console.print(
         f"  [dim]steps[/dim] [cyan]{stats['steps']}[/cyan]"
         f"   [dim]tool calls[/dim] [cyan]{stats['tool_calls']}[/cyan]"
         f"   [dim]failures[/dim] [{fail_style}]{fail_icon} {stats['tool_failures']}[/{fail_style}]"
         f"   [dim]time[/dim] [cyan]{stats['seconds']}s[/cyan]"
+        f"   [{colour}]{'finished' if stats.get('finished') else 'unfinished'}[/{colour}]"
     )

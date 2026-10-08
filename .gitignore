@@ -1,5 +1,7 @@
 .venv/
-workspace/
-testbox*/
+.va/
 __pycache__/
 *.pyc
+.DS_Store
+workspace/
+testbox*/

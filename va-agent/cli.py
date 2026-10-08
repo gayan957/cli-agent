@@ -3,6 +3,13 @@
 import os
 import sys
 
+# --print: non-interactive one-shot mode (CI). Must run before `import agent`,
+# because safety.py reads VA_AUTO_APPROVE once at import time.
+PRINT_MODE = "--print" in sys.argv
+if PRINT_MODE:
+    os.environ["VA_AUTO_APPROVE"] = "1"
+    sys.argv.remove("--print")
+
 import llm
 import tools
 import ui
@@ -143,9 +150,10 @@ def repl():
 
 
 def main():
-    ui.banner()
-    pick_workspace()
-    pick_model()
+    if not PRINT_MODE:
+        ui.banner()
+        pick_workspace()
+        pick_model()
     if len(sys.argv) > 1:
         ui.summary(run(" ".join(sys.argv[1:])))
         return
