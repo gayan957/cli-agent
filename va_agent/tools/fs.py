@@ -2,6 +2,7 @@
 
 Every path goes through :func:`_safe`, which reads ``config.SANDBOX`` at
 call time so the evaluation harness can redirect the agent between runs.
+Access control lives in :mod:`va_agent.harness.permissions`.
 """
 
 import os
@@ -20,12 +21,10 @@ COMMAND_TIMEOUT = 60
 
 
 def _safe(path):
-    """Resolve *path* inside the sandbox, or raise ValueError."""
+    """Resolve *path* against the sandbox. Never blocks: whether an outside
+    path may be used is decided by harness.permissions before a tool runs."""
     root = os.path.realpath(config.SANDBOX)
-    full = os.path.realpath(os.path.join(root, path))
-    if full != root and not full.startswith(root + os.sep):
-        raise ValueError(f"Path '{path}' is outside the sandbox")
-    return full
+    return os.path.realpath(os.path.join(root, os.path.expanduser(path)))
 
 
 def _relative(full):

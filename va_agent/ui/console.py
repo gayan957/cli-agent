@@ -27,9 +27,10 @@ def describe_call(name, arguments, step=None):
     return f"[dim]  {prefix}{name}({shown})[/dim]"
 
 
-def banner(sandbox, model):
+def banner(sandbox, model, mode="default"):
     console.print(f"[bold cyan]va-agent[/bold cyan] [dim]|[/dim] "
-                  f"model: {model} [dim]|[/dim] sandbox: {sandbox}")
+                  f"model: {model} [dim]|[/dim] mode: {mode} [dim]|[/dim] "
+                  f"sandbox: {sandbox}")
 
 
 def summary(stats):

@@ -31,6 +31,17 @@ SANDBOX = os.path.abspath(os.environ.get("VA_SANDBOX", "./workspace"))
 # Skip approval prompts. Set True by run_eval.py for unattended runs.
 AUTO_APPROVE = _flag("VA_AUTO_APPROVE")
 
+# Permission mode: default | acceptEdits | plan | bypassPermissions.
+MODE = os.environ.get("VA_MODE", "default")
+
+# Extra directories the agent may touch besides SANDBOX.
+WORKING_DIRS = []
+
+# Permission rules, e.g. ["Bash(pytest:*)"] and ["Read(**/.env*)"].
+# Normally filled from .claude/settings.json by permissions.load_settings().
+ALLOW_RULES = []
+DENY_RULES = []
+
 # Which Ollama model to use.
 MODEL = os.environ.get("VA_MODEL", "qwen-coder-32k")
 

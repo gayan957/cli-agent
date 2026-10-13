@@ -50,7 +50,9 @@ def test_sandbox_escape_is_blocked(workdir):
     from va_agent.core.agent import run
     stats = run("read passwd", verbose=False)
 
-    assert stats["tool_failures"] == 1
+    # Phase 3: an outside path is denied by the permission layer before the
+    # tool runs (AUTO_APPROVE is on), so it is not a tool failure any more.
+    assert stats["tool_failures"] == 0
 
 
 def test_unknown_tool_is_counted(workdir):

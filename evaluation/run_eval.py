@@ -17,6 +17,7 @@ import fixture                                  # noqa: E402
 
 from va_agent.core import config                # noqa: E402
 from va_agent.core.agent import run             # noqa: E402
+from va_agent.harness import permissions        # noqa: E402
 
 config.AUTO_APPROVE = True
 
@@ -74,6 +75,8 @@ def main():
             for attempt in range(1, RUNS + 1):
                 workdir = fixture.build()
                 config.SANDBOX = workdir
+                permissions.reset_session()
+                permissions.load_settings(workdir)
                 os.chdir(workdir)
 
                 print(f"\n=== {task['id']} run {attempt} ===", flush=True)
