@@ -2,13 +2,11 @@
 
 import time
 
-from llm import chat
-from safety import approve, checkpoint
-from tools import REGISTRY, SCHEMAS
-import ui
-from ui import console
-
-MAX_STEPS = 20
+from va_agent.core import config
+from va_agent.core import llm
+from va_agent.harness.permissions import approve, checkpoint
+from va_agent.tools.fs import REGISTRY, SCHEMAS
+from va_agent.ui.console import console, describe_call
 
 SYSTEM = """You are a coding assistant working inside a project folder.
 
@@ -31,53 +29,53 @@ Rules:
   passing), reply with a short summary and no tool call."""
 
 
+def _new_stats(task):
+    return {"task": task, "steps": 0, "tool_calls": 0,
+            "tool_failures": 0, "seconds": 0.0, "finished": False}
+
+
 def run(task, verbose=True):
+    """Run one task to completion. Returns a stats dict."""
     checkpoint(task)
+
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": task}]
-
-    stats = {"task": task, "steps": 0, "tool_calls": 0,
-            "tool_failures": 0, "seconds": 0.0, "finished": False}
+    stats = _new_stats(task)
     started = time.time()
 
-    for step in range(MAX_STEPS):
+    for step in range(config.MAX_STEPS):
         stats["steps"] = step + 1
+
         try:
-            if verbose:
-                with console.status("[cyan]thinking...[/cyan]", spinner="dots"):
-                    reply = chat(messages, tools=SCHEMAS)
-            else:
-                reply = chat(messages, tools=SCHEMAS)
+            reply = llm.chat(messages, tools=SCHEMAS)
         except Exception as error:
             if verbose:
-                ui.llm_error(error)
+                console.print(f"[red]  LLM error: {error}[/red]")
+            stats["tool_failures"] += 1
             break
 
-        # Ollama's client re-validates outgoing messages, expecting each tool
-        # call as {"function": {"name": ..., "arguments": ...}} — reshape our
-        # normalised {"name": ..., "arguments": ...} calls back into that
-        # before they go into history and get sent on the next turn.
+        # Ollama re-validates history and requires each tool call as
+        # {"function": {"name": ..., "arguments": ...}}. Sending our
+        # normalised {"name", "arguments"} shape fails on the next step.
         messages.append({"role": "assistant",
-                        "content": reply["content"],
-                        "tool_calls": [
-                            {"function": {"name": call["name"], "arguments": call["arguments"]}}
-                            for call in reply["tool_calls"]
-                        ] or None})
+                         "content": reply["content"],
+                         "tool_calls": [
+                             {"function": {"name": c["name"],
+                                           "arguments": c["arguments"]}}
+                             for c in reply["tool_calls"]] or None})
 
         if not reply["tool_calls"]:
             if reply["content"].strip():
                 if verbose:
-                    ui.final_reply(reply["content"])
+                    console.print(reply["content"])
                 stats["finished"] = True
                 break
-            # A genuinely blank reply — no text, no tool call — is never a
-            # real finish. Nudge instead of silently ending the task.
-            if verbose:
-                ui.empty_reply()
+            # A blank reply (no text, no tool call) is never a real finish.
             messages.append({"role": "user",
-                            "content": "You replied with nothing and called no tool. "
-                                        "Call a tool now to make progress, or explain "
-                                        "why the task is already done."})
+                             "content": "You replied with nothing and called "
+                                        "no tool. Call a tool now to make "
+                                        "progress, or explain why the task "
+                                        "is already done."})
             continue
 
         for call in reply["tool_calls"]:
@@ -87,20 +85,16 @@ def run(task, verbose=True):
 
             if name not in REGISTRY:
                 stats["tool_failures"] += 1
-                if verbose:
-                    ui.unknown_tool(name)
                 messages.append({"role": "tool",
-                                "content": f"ERROR: no tool named '{name}'"})
+                                 "content": f"ERROR: no tool named '{name}'"})
                 continue
 
             if verbose:
-                ui.tool_call(step + 1, name, arguments)
+                console.print(describe_call(name, arguments, step + 1))
 
             if not approve(name, arguments):
-                if verbose:
-                    ui.tool_denied()
                 messages.append({"role": "tool",
-                                "content": "User denied this action."})
+                                 "content": "User denied this action."})
                 continue
 
             try:
@@ -108,13 +102,13 @@ def run(task, verbose=True):
             except Exception as error:
                 stats["tool_failures"] += 1
                 result = f"ERROR: {type(error).__name__}: {error}"
-                if verbose:
-                    ui.tool_error(result)
 
             messages.append({"role": "tool", "content": str(result)})
     else:
         if verbose:
-            ui.step_limit(MAX_STEPS)
+            console.print(
+                f"[yellow]Stopped: hit the {config.MAX_STEPS} step limit."
+                f"[/yellow]")
 
     stats["seconds"] = round(time.time() - started, 1)
     return stats

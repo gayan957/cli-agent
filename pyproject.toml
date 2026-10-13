@@ -1,0 +1,19 @@
+[project]
+name = "va-agent"
+version = "0.2.0"
+requires-python = ">=3.10"
+dependencies = ["ollama", "rich", "pyyaml"]
+
+[project.scripts]
+va = "va_agent.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["va_agent*"]
+[tool.pytest.ini_options]
+# Only the agent's own tests. evaluation/fixture_repo has its own tests that
+# import `notes` and must be run from inside that directory.
+testpaths = ["tests"]
