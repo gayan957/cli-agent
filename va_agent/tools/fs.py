@@ -88,6 +88,76 @@ def Read(file_path, offset=None, limit=None):
     return "\n".join(out) if out else "(empty file)"
 
 
+def Write(file_path, content):
+    """Write a whole file, creating parent folders as needed."""
+    full = _safe(file_path)
+    parent = os.path.dirname(full)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(full, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    # The model has just supplied the full content, so it may Edit it next.
+    config.READ_FILES.add(full)
+    return f"Wrote {len(content)} characters to {file_path}"
+
+
+def _flag(value):
+    """Small models send booleans as strings; accept both."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return bool(value)
+
+
+def Edit(file_path, old_string, new_string, replace_all=False):
+    """Replace an exact string in a file. ``old_string`` must be unique
+    unless ``replace_all`` is set. The file must have been Read first."""
+    full = _safe(file_path)
+    if full not in config.READ_FILES:
+        raise ValueError("You must Read this file before editing it. "
+                         f"Call Read on {file_path} first.")
+    if old_string == new_string:
+        raise ValueError("old_string and new_string are identical, so "
+                         "nothing would change. Provide the new text in "
+                         "new_string.")
+    if old_string == "":
+        raise ValueError("old_string is empty. Copy the exact text to "
+                         "replace from the Read output.")
+
+    with open(full, encoding="utf-8") as handle:
+        text = handle.read()
+
+    found = text.count(old_string)
+    if found == 0:
+        raise ValueError("old_string not found in file. Read the file again "
+                         "and copy the exact text, including whitespace and "
+                         "indentation, without the line-number prefix.")
+    if found > 1 and not _flag(replace_all):
+        raise ValueError(f"old_string appears {found} times in the file; it "
+                         "must be unique. Add surrounding lines to make it "
+                         "unique, or set replace_all to true to replace "
+                         "every occurrence.")
+
+    # Rebuild the text so we know where each replacement landed.
+    lines, cursor, built = [], 0, ""
+    while True:
+        index = text.find(old_string, cursor)
+        if index == -1:
+            break
+        built += text[cursor:index]
+        lines.append(built.count("\n") + 1)
+        built += new_string
+        cursor = index + len(old_string)
+    built += text[cursor:]
+
+    with open(full, "w", encoding="utf-8") as handle:
+        handle.write(built)
+
+    where = ", ".join(str(n) for n in lines)
+    plural = "s" if len(lines) > 1 else ""
+    return (f"Replaced {len(lines)} occurrence{plural} in {file_path} "
+            f"at line{plural} {where}.")
+
+
 def write_file(path, content):
     """Write *content* to *path*, creating parent folders as needed."""
     full = _safe(path)
