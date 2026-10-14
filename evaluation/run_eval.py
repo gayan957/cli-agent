@@ -18,6 +18,10 @@ import fixture                                  # noqa: E402
 from va_agent.core import config                # noqa: E402
 from va_agent.core.agent import run             # noqa: E402
 from va_agent.harness import permissions        # noqa: E402
+from va_agent.harness import snapshots          # noqa: E402
+from va_agent.tools import registry             # noqa: E402
+from va_agent.tools import shell                # noqa: E402
+from va_agent.tools import todo                 # noqa: E402
 
 config.AUTO_APPROVE = True
 
@@ -31,7 +35,9 @@ SYSTEM_ID = os.environ.get("VA_SYSTEM", "A")
 
 COLUMNS = ["timestamp", "system", "model", "task_id", "difficulty", "files",
            "run", "success", "steps", "tool_calls", "tool_failures",
-           "seconds", "finished"]
+           "seconds", "finished",
+           # Phase 4 experiment outputs.
+           "edit_attempts", "edit_failures", "peak_tokens"]
 
 
 def verify(command, cwd):
@@ -58,13 +64,48 @@ def preflight():
         sys.exit(f"Model {config.MODEL!r} not found in Ollama: {models}")
 
 
+def upgrade_header(path):
+    """Older results files lack the newer columns. Rewrite the header in
+    place (old rows get blanks) so appended rows stay aligned. Refuse if
+    the existing columns are not a subset of COLUMNS."""
+    with open(path, newline="") as handle:
+        rows = list(csv.reader(handle))
+    if not rows or rows[0] == COLUMNS:
+        return
+    old = rows[0]
+    if not set(old) <= set(COLUMNS):
+        sys.exit(f"{path} has unexpected columns {old}; set VA_OUT to a new "
+                 "file instead.")
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(COLUMNS)
+        for row in rows[1:]:
+            record = dict(zip(old, row))
+            writer.writerow([record.get(column, "") for column in COLUMNS])
+    print(f"Upgraded {path} to {len(COLUMNS)} columns", flush=True)
+
+
+def reset_run_state(workdir):
+    """Everything that must not leak from one run into the next."""
+    config.SANDBOX = workdir
+    permissions.reset_session()
+    permissions.load_settings(workdir)
+    shell.reset()
+    todo.reset()
+    config.READ_FILES.clear()
+    snapshots.new_session()
+
+
 def main():
     preflight()
+    registry.edit_mode()                # fail now on a VA_EDIT_MODE typo
     with open(TASKS) as handle:
         tasks = json.load(handle)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     is_new = not os.path.exists(OUT)
+    if not is_new:
+        upgrade_header(OUT)
 
     with open(OUT, "a", newline="") as out_handle:
         writer = csv.writer(out_handle)
@@ -74,9 +115,7 @@ def main():
         for task in tasks:
             for attempt in range(1, RUNS + 1):
                 workdir = fixture.build()
-                config.SANDBOX = workdir
-                permissions.reset_session()
-                permissions.load_settings(workdir)
+                reset_run_state(workdir)
                 os.chdir(workdir)
 
                 print(f"\n=== {task['id']} run {attempt} ===", flush=True)
@@ -85,7 +124,9 @@ def main():
                 except Exception as error:
                     print(f"    agent crashed: {error}")
                     stats = {"steps": 0, "tool_calls": 0, "tool_failures": 1,
-                             "seconds": 0.0, "finished": False}
+                             "seconds": 0.0, "finished": False,
+                             "edit_attempts": 0, "edit_failures": 0,
+                             "peak_tokens": 0}
 
                 score = verify(task.get("verify"), workdir)
 
@@ -95,13 +136,19 @@ def main():
                     attempt, score, stats["steps"], stats["tool_calls"],
                     stats["tool_failures"], stats["seconds"],
                     int(stats.get("finished", False)),
+                    stats["edit_attempts"], stats["edit_failures"],
+                    stats["peak_tokens"],
                 ])
                 out_handle.flush()
 
                 print(f"    success={score} steps={stats['steps']} "
                       f"failures={stats['tool_failures']} "
+                      f"edits={stats['edit_attempts']}"
+                      f"/{stats['edit_failures']}fail "
+                      f"tokens={stats['peak_tokens']} "
                       f"time={stats['seconds']}s", flush=True)
 
+                shell.reset()
                 os.chdir(HERE)
                 fixture.destroy(workdir)
 

@@ -19,13 +19,26 @@ from va_agent.ui.console import console, describe_call
 
 MODES = ("default", "acceptEdits", "plan", "bypassPermissions")
 
-READ_ONLY = {"list_files", "read_file", "grep"}
-MUTATING = {"write_file", "run_command"}
-EDIT_TOOLS = {"write_file"}
-PATH_TOOLS = {"list_files", "read_file", "write_file", "grep"}
+# Both the Claude Code names and the old names are callable (see
+# tools/registry.py), so every set lists both.
+READ_ONLY = {"Read", "Glob", "Grep", "TodoWrite",
+             "list_files", "read_file", "grep"}
+MUTATING = {"Write", "Edit", "Bash", "write_file", "run_command"}
+EDIT_TOOLS = {"Write", "Edit", "write_file"}
+COMMAND_TOOLS = {"Bash", "run_command"}
+PATH_TOOLS = {"Read", "Write", "Edit", "Glob", "Grep",
+              "list_files", "read_file", "write_file", "grep"}
 
-# Claude Code tool names each project tool also answers to in rules.
+# Other names each tool answers to in rules, so a project configured for
+# Claude Code works unchanged and old project names keep working. As in
+# Claude Code, an Edit rule also covers Write and vice versa.
 ALIASES = {
+    "Read": {"read_file"},
+    "Write": {"Edit", "write_file"},
+    "Edit": {"Write", "write_file"},
+    "Bash": {"run_command"},
+    "Glob": {"LS", "list_files"},
+    "Grep": {"grep"},
     "read_file": {"Read"},
     "write_file": {"Write", "Edit"},
     "run_command": {"Bash"},
@@ -133,6 +146,14 @@ def _path_matches(pattern, path):
     return False
 
 
+def _path_arg(arguments):
+    """The path a call touches: file_path (Read/Write/Edit) or path."""
+    path = arguments.get("file_path")
+    if path is None:
+        path = arguments.get("path", ".")
+    return path
+
+
 def _rule_hits(rule, name, arguments, segment=None):
     """Does *rule* match this call (or this one command segment)?"""
     rule_tool, pattern = _parse_rule(rule)
@@ -140,16 +161,16 @@ def _rule_hits(rule, name, arguments, segment=None):
         return False
     if pattern is None or pattern.strip() in ("", "*"):
         return True
-    if name == "run_command":
+    if name in COMMAND_TOOLS:
         return _command_matches(pattern, segment or "")
     if name in PATH_TOOLS:
-        return _path_matches(pattern, arguments.get("path", "."))
+        return _path_matches(pattern, _path_arg(arguments))
     return False
 
 
 def _denied_by_rule(name, arguments):
     rules = config.DENY_RULES
-    if name == "run_command":
+    if name in COMMAND_TOOLS:
         # Any one denied segment denies the whole chain.
         for segment in _segments(str(arguments.get("command", ""))) or [""]:
             for rule in rules:
@@ -164,7 +185,7 @@ def _denied_by_rule(name, arguments):
 
 def _allowed_by_rule(name, arguments):
     rules = config.ALLOW_RULES
-    if name == "run_command":
+    if name in COMMAND_TOOLS:
         # Every segment must be allowed, or "pytest && curl x" slips through.
         segments = _segments(str(arguments.get("command", "")))
         if not segments:
@@ -199,7 +220,7 @@ def check(name, arguments):
         return "deny", "plan mode is read-only"
 
     if name in PATH_TOOLS:
-        path = arguments.get("path", ".")
+        path = _path_arg(arguments)
         if classify_path(path) == "outside":
             if unattended:
                 # Unattended runs must never reach outside their workdir.
