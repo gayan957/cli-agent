@@ -51,6 +51,43 @@ def read_file(path):
     return text
 
 
+READ_LINE_CAP = 2000
+READ_LINE_CHARS = 2000
+
+
+def Read(file_path, offset=None, limit=None):
+    """Return a file's lines numbered like ``cat -n``: a 6-wide line number,
+    a tab, then the line. ``offset`` is the 1-based first line, ``limit``
+    the number of lines (default 2000)."""
+    full = _safe(file_path)
+    if not os.path.exists(full):
+        raise FileNotFoundError(
+            f"File not found: {file_path}. Use Glob to find the right path.")
+    if os.path.isdir(full):
+        raise IsADirectoryError(
+            f"{file_path} is a directory. Use Glob to list its files.")
+
+    with open(full, encoding="utf-8", errors="replace") as handle:
+        lines = handle.read().splitlines()
+    total = len(lines)
+
+    start = max(int(offset or 1), 1)
+    count = int(limit) if limit else READ_LINE_CAP
+    if total and start > total:
+        raise ValueError(f"offset {start} is past the end of {file_path} "
+                         f"({total} lines). Use a smaller offset.")
+
+    shown = lines[start - 1:start - 1 + count]
+    out = [f"{number:>6}\t{line[:READ_LINE_CHARS]}"
+           for number, line in enumerate(shown, start)]
+    last = start - 1 + len(shown)
+    if last < total:
+        out.append(f"...[TRUNCATED at line {last} of {total}]")
+
+    config.READ_FILES.add(full)
+    return "\n".join(out) if out else "(empty file)"
+
+
 def write_file(path, content):
     """Write *content* to *path*, creating parent folders as needed."""
     full = _safe(path)

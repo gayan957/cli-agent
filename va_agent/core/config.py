@@ -42,6 +42,19 @@ WORKING_DIRS = []
 ALLOW_RULES = []
 DENY_RULES = []
 
+# Which editing tools the model is offered: write | edit | both.
+# This is the Phase 4 experiment; see tools/registry.py.
+EDIT_MODE = os.environ.get("VA_EDIT_MODE", "write")
+
+# Offer the TodoWrite tool. Second Phase 4 experiment.
+TODOS = os.environ.get("VA_TODOS", "1") != "0"
+
+# Identifies this session's snapshots under .va/snapshots/.
+SESSION_ID = ""
+
+# Resolved paths of files Read this session, for read-before-edit.
+READ_FILES = set()
+
 # Which Ollama model to use.
 MODEL = os.environ.get("VA_MODEL", "qwen-coder-32k")
 
