@@ -50,3 +50,25 @@ def summary(stats):
         f"finished={stats['finished']}[/{colour}]"
     )
     
+
+TODO_MARKS = {"completed": "☒", "pending": "☐", "in_progress": "▶"}
+
+
+def todo_lines(todos):
+    """Plain-text todo list: ☒ completed, ▶ in progress, ☐ pending."""
+    return "\n".join(f"  {TODO_MARKS.get(t['status'], '☐')} {t['content']}"
+                     for t in todos) or "  (no todos)"
+
+
+def render_todos(todos):
+    """Show the todo list in the terminal."""
+    console.print("[bold]  Todos[/bold]")
+    styles = {"completed": "dim", "in_progress": "cyan"}
+    for todo in todos:
+        mark = TODO_MARKS.get(todo["status"], "☐")
+        text = f"  {mark} {todo['content']}"
+        if _RICH:
+            from rich.markup import escape
+            style = styles.get(todo["status"])
+            text = f"[{style}]{escape(text)}[/{style}]" if style else escape(text)
+        console.print(text)
