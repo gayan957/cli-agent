@@ -4,12 +4,14 @@ import sys
 
 from va_agent.core import config
 from va_agent.core.agent import run
-from va_agent.harness import permissions
+from va_agent.harness import permissions, snapshots
 from va_agent.ui.console import banner, console, summary
 
 HELP = """Commands:
   /mode            show the current permission mode
   /mode <name>     switch mode: default | acceptEdits | plan | bypassPermissions
+  /rewind          list file snapshots and restore to before a step
+  /rewind <step>   restore files to how they were before that step
   /help            show this list
   exit, quit       leave va-agent
 Anything else is sent to the agent as a task."""
@@ -47,14 +49,43 @@ def _slash_command(text):
         else:
             console.print("[yellow]unknown mode; choose one of: "
                           + ", ".join(permissions.MODES) + "[/yellow]")
+    elif parts[0] == "/rewind":
+        _rewind(parts[1] if len(parts) > 1 else None)
     else:
         console.print(f"[yellow]unknown command {parts[0]}; try /help[/yellow]")
     return True
 
 
+def _rewind(step=None):
+    """List snapshots, then restore files to before the chosen step."""
+    found = snapshots.list_snapshots()
+    if not found:
+        console.print("no snapshots yet")
+        return
+    if step is None:
+        for number, paths in found:
+            console.print(f"  step {number}: {', '.join(paths)}")
+        try:
+            step = input("  Rewind to before which step? (Enter cancels) ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        step = step.strip()
+        if not step:
+            return
+    if not step.isdigit():
+        console.print("[yellow]step must be a number[/yellow]")
+        return
+    done = snapshots.rewind(int(step))
+    for line in done:
+        console.print(f"  {line}")
+    console.print(f"[green]rewound {len(done)} file change(s)[/green]")
+
+
 def main(argv=None):
     argv, mode = _consume_flags(list(sys.argv[1:] if argv is None else argv))
     permissions.load_settings()
+    snapshots.new_session()
     if mode:
         config.MODE = mode          # the flag beats settings.json
     banner(config.SANDBOX, config.MODEL, config.MODE)

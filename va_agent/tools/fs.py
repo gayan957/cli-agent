@@ -10,6 +10,7 @@ import re
 import subprocess
 
 from va_agent.core import config
+from va_agent.harness import snapshots
 
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".pytest_cache",
              ".va"}
@@ -92,6 +93,7 @@ def Read(file_path, offset=None, limit=None):
 def Write(file_path, content):
     """Write a whole file, creating parent folders as needed."""
     full = _safe(file_path)
+    snapshots.save(full)
     parent = os.path.dirname(full)
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -150,6 +152,7 @@ def Edit(file_path, old_string, new_string, replace_all=False):
         cursor = index + len(old_string)
     built += text[cursor:]
 
+    snapshots.save(full)
     with open(full, "w", encoding="utf-8") as handle:
         handle.write(built)
 

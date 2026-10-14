@@ -4,6 +4,7 @@ import time
 
 from va_agent.core import config
 from va_agent.core import llm
+from va_agent.harness import snapshots
 from va_agent.harness.permissions import approve, checkpoint
 from va_agent.tools.fs import REGISTRY, SCHEMAS
 from va_agent.ui.console import console, describe_call
@@ -45,6 +46,7 @@ def run(task, verbose=True):
 
     for step in range(config.MAX_STEPS):
         stats["steps"] = step + 1
+        snapshots.next_step()
 
         try:
             reply = llm.chat(messages, tools=SCHEMAS)
