@@ -11,7 +11,8 @@ import subprocess
 
 from va_agent.core import config
 
-SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".pytest_cache"}
+SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".pytest_cache",
+             ".va"}
 BLOCKED = ["rm -rf", "sudo", "shutdown", "mkfs", "dd if=", ":(){", "> /dev/"]
 
 MAX_READ_CHARS = 50_000
@@ -156,6 +157,105 @@ def Edit(file_path, old_string, new_string, replace_all=False):
     plural = "s" if len(lines) > 1 else ""
     return (f"Replaced {len(lines)} occurrence{plural} in {file_path} "
             f"at line{plural} {where}.")
+
+
+GLOB_CAP = 100
+
+
+def _glob_regex(pattern):
+    """Translate a glob with ``**`` support into a regex over "/" paths.
+    ``**/`` spans zero or more folders, ``*`` stays within one."""
+    out, i = "", 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out += "(?:.*/)?"
+            i += 3
+        elif pattern.startswith("**", i):
+            out += ".*"
+            i += 2
+        elif pattern[i] == "*":
+            out += "[^/]*"
+            i += 1
+        elif pattern[i] == "?":
+            out += "[^/]"
+            i += 1
+        else:
+            out += re.escape(pattern[i])
+            i += 1
+    return re.compile(out + r"\Z")
+
+
+def _walk(root_dir):
+    """Yield every file under *root_dir*, skipping SKIP_DIRS."""
+    if os.path.isfile(root_dir):
+        yield root_dir
+        return
+    for root, dirs, files in os.walk(root_dir):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        for name in files:
+            yield os.path.join(root, name)
+
+
+def Glob(pattern, path="."):
+    """Files under *path* matching *pattern* (e.g. ``**/*.py``), newest
+    first, at most 100. Paths are relative to the project root."""
+    root_dir = _safe(path)
+    regex = _glob_regex(pattern.strip().lstrip("/"))
+    found = []
+    for full in _walk(root_dir):
+        if regex.match(os.path.relpath(full, root_dir).replace(os.sep, "/")):
+            try:
+                found.append((os.path.getmtime(full), full))
+            except OSError:
+                continue
+    if not found:
+        return "No files found"
+    found.sort(key=lambda item: item[0], reverse=True)
+    shown = [_relative(full) for _, full in found[:GLOB_CAP]]
+    if len(found) > GLOB_CAP:
+        shown.append(f"...[showing {GLOB_CAP} of {len(found)} files]")
+    return "\n".join(shown)
+
+
+def Grep(pattern, path=".", glob=None, output_mode="content"):
+    """Search file contents for a regex. ``glob`` limits which files are
+    searched; ``output_mode`` is "content" (file:line: text) or
+    "files_with_matches" (paths only)."""
+    if output_mode not in {"content", "files_with_matches"}:
+        raise ValueError('output_mode must be "content" or '
+                         '"files_with_matches"')
+    try:
+        regex = re.compile(pattern)
+    except re.error as error:
+        raise ValueError(f"Invalid regex {pattern!r}: {error}. Escape special "
+                         "characters such as ( [ . * with a backslash.")
+    root_dir = _safe(path)
+    file_filter = _glob_regex(glob.strip()) if glob else None
+
+    hits, files = [], []
+    for full in _walk(root_dir):
+        if file_filter:
+            rel = os.path.relpath(full, root_dir).replace(os.sep, "/")
+            if not (file_filter.match(rel)
+                    or file_filter.match(os.path.basename(full))):
+                continue
+        try:
+            with open(full, encoding="utf-8", errors="ignore") as handle:
+                for number, line in enumerate(handle, 1):
+                    if regex.search(line):
+                        if output_mode == "files_with_matches":
+                            files.append(_relative(full))
+                            break
+                        hits.append(f"{_relative(full)}:{number}: "
+                                    f"{line.strip()[:200]}")
+        except OSError:
+            continue
+        if len(hits) >= MAX_GREP_HITS:
+            break
+
+    if output_mode == "files_with_matches":
+        return "\n".join(sorted(files)) or "No matches"
+    return "\n".join(hits[:MAX_GREP_HITS]) or "No matches"
 
 
 def write_file(path, content):
