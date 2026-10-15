@@ -64,8 +64,9 @@ def _slash_command(text):
 
 
 def _show_rules():
-    """Global, injected and held rules. A rule that never fires is this
-    feature's main failure mode, so this is how to check."""
+    """Global, injected, held and broken rules. A rule that never fires is
+    this feature's main failure mode, so this is how to check. Empty
+    sections are left out."""
     if not config.RULES_ENABLED:
         console.print("[yellow]rules are off (VA_RULES=0)[/yellow]")
         return
@@ -82,14 +83,19 @@ def _show_rules():
          [(r.name, "paths: " + ", ".join(r.patterns))
           for r in every
           if r.patterns is not None and r.name not in config.RULES_INJECTED]),
+        ("Broken (not loaded):",
+         list(config.RULES_BROKEN)),
     ]
-    width = max((len(name) for _, items in sections for name, _ in items),
-                default=0) + 2
+    sections = [(title, items) for title, items in sections if items]
+    if not sections:
+        console.print("no rules found in .claude/rules/")
+        return
+    width = max(len(name) for _, items in sections for name, _ in items) + 2
     for number, (title, items) in enumerate(sections):
         if number:
             console.print("")
         console.print(title, markup=False)
-        for name, note in items or [("(none)", "")]:
+        for name, note in items:
             console.print(f"  {name.ljust(width)}{note}".rstrip(),
                           markup=False, highlight=False)
 
