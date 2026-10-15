@@ -54,7 +54,7 @@ def _slash_command(text):
     elif parts[0] == "/rules":
         _show_rules()
     elif parts[0] == "/clear":
-        rules.reset_session()
+        rules.reset_rules()
         console.print("cleared: path-scoped rules can inject again")
     elif parts[0] == "/rewind":
         _rewind(parts[1] if len(parts) > 1 else None)
@@ -124,7 +124,7 @@ def main(argv=None):
     argv, mode = _consume_flags(list(sys.argv[1:] if argv is None else argv))
     permissions.load_settings()
     rules.discover()
-    rules.reset_session()
+    rules.reset_rules()
     snapshots.new_session()
     if mode:
         config.MODE = mode          # the flag beats settings.json

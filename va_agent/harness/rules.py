@@ -246,8 +246,9 @@ def matched_path(rule):
     return _matched.get(rule.name)
 
 
-def reset_session():
-    """Make every path-scoped rule injectable again."""
+def reset_rules():
+    """Make every path-scoped rule injectable again. Not reset_session:
+    harness/permissions.py already has that name."""
     config.RULES_INJECTED.clear()
     _matched.clear()
 

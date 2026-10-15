@@ -94,7 +94,7 @@ def reset_run_state(workdir):
     shell.reset()
     todo.reset()
     config.READ_FILES.clear()
-    rules.reset_session()   # rules are never discovered here: none load
+    rules.reset_rules()     # rules are never discovered here: none load
     snapshots.new_session()
 
 

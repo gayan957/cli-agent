@@ -55,20 +55,17 @@ def system_prompt():
     return SYSTEM.format(edit_how=edit_how, edit_rule=edit_rule)
 
 
-# Tools whose path argument can trigger a path-scoped rule. Glob and Grep
-# only count when the model gave an explicit path.
+# Tools whose file path can trigger a path-scoped rule: Read, Write, Edit
+# (and the old names for the same tools). Not Glob or Grep: their path is a
+# folder or a pattern, not a file.
 FILE_TOOLS = {"Read", "Write", "Edit", "read_file", "write_file"}
-SEARCH_TOOLS = {"Glob", "Grep", "list_files", "grep"}
 
 
 def _touched_path(name, arguments):
-    """The path a successful tool call touched, or None."""
-    if name in FILE_TOOLS:
-        path = arguments.get("file_path", arguments.get("path"))
-    elif name in SEARCH_TOOLS:
-        path = arguments.get("path")
-    else:
+    """The file a successful Read/Write/Edit touched, or None."""
+    if name not in FILE_TOOLS:
         return None
+    path = arguments.get("file_path", arguments.get("path"))
     return path if isinstance(path, str) and path else None
 
 

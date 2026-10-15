@@ -18,9 +18,9 @@ def clean_state(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "RULES_INJECTED", set())
     monkeypatch.setattr(config, "RULES_BROKEN", [])
     monkeypatch.setattr(rules, "USER_RULES_DIR", str(tmp_path / "home_rules"))
-    rules.reset_session()
+    rules.reset_rules()
     yield project
-    rules.reset_session()
+    rules.reset_rules()
 
 
 def write_rule(base, name, text):
@@ -181,10 +181,10 @@ def test_injected_rule_is_not_returned_again(three_rules):
     assert rules.matched_path(rule) == "tests/a.py"
 
 
-def test_reset_session_makes_rules_available_again(three_rules):
+def test_reset_rules_makes_rules_available_again(three_rules):
     rule, = rules.rules_for("tests/a.py")
     rules.mark_injected(rule)
-    rules.reset_session()
+    rules.reset_rules()
     assert names(rules.rules_for("tests/a.py")) == ["testing.md"]
 
 
