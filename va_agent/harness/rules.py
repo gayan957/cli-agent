@@ -162,3 +162,60 @@ def discover(project_dir=None):
         by_name[rule.name] = rule
     config.RULES = sorted(by_name.values(), key=lambda rule: rule.name)
     return list(config.RULES)
+
+
+# Which path first triggered each injected rule, for /rules.
+_matched = {}
+
+
+def _relative(path):
+    """*path* relative to the project root when it is inside it."""
+    root = os.path.realpath(config.SANDBOX)
+    full = os.path.realpath(os.path.join(root, os.path.expanduser(str(path))))
+    if full == root:
+        return "."
+    if full.startswith(root + os.sep):
+        return os.path.relpath(full, root).replace(os.sep, "/")
+    return str(path)
+
+
+def global_rules():
+    """Rules with no patterns: always loaded into the system prompt."""
+    if not config.RULES_ENABLED:
+        return []
+    return [rule for rule in config.RULES if rule.patterns is None]
+
+
+def rules_for(path):
+    """Path-scoped rules matching *path* that have not been injected yet."""
+    if not config.RULES_ENABLED:
+        return []
+    target = _relative(path)
+    return [rule for rule in config.RULES
+            if rule.patterns is not None
+            and rule.name not in config.RULES_INJECTED
+            and any(matches(target, pattern) for pattern in rule.patterns)]
+
+
+def mark_injected(rule, path=None):
+    """Record that *rule* was injected, so it is not injected again."""
+    config.RULES_INJECTED.add(rule.name)
+    if path is not None:
+        _matched[rule.name] = _relative(path)
+
+
+def matched_path(rule):
+    """The path that first injected *rule* this session, if known."""
+    return _matched.get(rule.name)
+
+
+def reset_session():
+    """Make every path-scoped rule injectable again."""
+    config.RULES_INJECTED.clear()
+    _matched.clear()
+
+
+def system_text():
+    """Global rule bodies, formatted for the end of the system prompt."""
+    return "".join(f"\n\n[project rule: {rule.name}]\n\n{rule.body}"
+                   for rule in global_rules())

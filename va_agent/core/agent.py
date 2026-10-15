@@ -4,7 +4,7 @@ import time
 
 from va_agent.core import config
 from va_agent.core import llm
-from va_agent.harness import snapshots
+from va_agent.harness import rules, snapshots
 from va_agent.harness.permissions import approve, checkpoint
 from va_agent.tools import registry
 from va_agent.ui.console import console, describe_call
@@ -55,6 +55,23 @@ def system_prompt():
     return SYSTEM.format(edit_how=edit_how, edit_rule=edit_rule)
 
 
+# Tools whose path argument can trigger a path-scoped rule. Glob and Grep
+# only count when the model gave an explicit path.
+FILE_TOOLS = {"Read", "Write", "Edit", "read_file", "write_file"}
+SEARCH_TOOLS = {"Glob", "Grep", "list_files", "grep"}
+
+
+def _touched_path(name, arguments):
+    """The path a successful tool call touched, or None."""
+    if name in FILE_TOOLS:
+        path = arguments.get("file_path", arguments.get("path"))
+    elif name in SEARCH_TOOLS:
+        path = arguments.get("path")
+    else:
+        return None
+    return path if isinstance(path, str) and path else None
+
+
 def _new_stats(task):
     return {"task": task, "steps": 0, "tool_calls": 0,
             "tool_failures": 0, "seconds": 0.0, "finished": False,
@@ -70,7 +87,8 @@ def run(task, verbose=True):
     tools = registry.build_registry()
     schemas = registry.build_schemas()
 
-    messages = [{"role": "system", "content": system_prompt()},
+    messages = [{"role": "system",
+                 "content": system_prompt() + rules.system_text()},
                 {"role": "user", "content": task}]
     stats = _new_stats(task)
     started = time.time()
@@ -143,8 +161,21 @@ def run(task, verbose=True):
                 if is_edit:
                     stats["edit_failures"] += 1
                 result = f"ERROR: {type(error).__name__}: {error}"
+                messages.append({"role": "tool", "content": str(result)})
+                continue
 
             messages.append({"role": "tool", "content": str(result)})
+
+            # Path-scoped rules arrive right after the file they apply to.
+            # role "user": several local models ignore mid-chat system turns.
+            path = _touched_path(name, arguments)
+            for rule in rules.rules_for(path) if path else []:
+                messages.append({"role": "user",
+                                 "content": f"[project rule: {rule.name}]"
+                                            f"\n\n{rule.body}"})
+                rules.mark_injected(rule, path)
+                if verbose:
+                    console.print(f"[dim]  rule loaded: {rule.name}[/dim]")
     else:
         if verbose:
             console.print(

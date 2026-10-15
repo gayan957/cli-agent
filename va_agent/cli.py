@@ -4,7 +4,7 @@ import sys
 
 from va_agent.core import config
 from va_agent.core.agent import run
-from va_agent.harness import permissions, snapshots
+from va_agent.harness import permissions, rules, snapshots
 from va_agent.ui.console import banner, console, summary
 
 HELP = """Commands:
@@ -85,6 +85,8 @@ def _rewind(step=None):
 def main(argv=None):
     argv, mode = _consume_flags(list(sys.argv[1:] if argv is None else argv))
     permissions.load_settings()
+    rules.discover()
+    rules.reset_session()
     snapshots.new_session()
     if mode:
         config.MODE = mode          # the flag beats settings.json

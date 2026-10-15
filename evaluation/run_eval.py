@@ -18,6 +18,7 @@ import fixture                                  # noqa: E402
 from va_agent.core import config                # noqa: E402
 from va_agent.core.agent import run             # noqa: E402
 from va_agent.harness import permissions        # noqa: E402
+from va_agent.harness import rules              # noqa: E402
 from va_agent.harness import snapshots          # noqa: E402
 from va_agent.tools import registry             # noqa: E402
 from va_agent.tools import shell                # noqa: E402
@@ -93,6 +94,7 @@ def reset_run_state(workdir):
     shell.reset()
     todo.reset()
     config.READ_FILES.clear()
+    rules.reset_session()   # rules are never discovered here: none load
     snapshots.new_session()
 
 
