@@ -9,6 +9,7 @@ Rules are context only. They never grant or deny permission; that stays in
 harness/permissions.py.
 """
 
+import functools
 import os
 import re
 from dataclasses import dataclass
@@ -79,6 +80,52 @@ def patterns_of(meta):
             if part:
                 found.append(part)
     return found or None
+
+
+@functools.lru_cache(maxsize=None)
+def _to_regex(pattern):
+    """Glob to regex. ``*`` and ``?`` stay within one folder, ``**``
+    crosses folders, and ``**/`` also matches zero folders. Not fnmatch:
+    its ``*`` crosses "/", so ``tests/*`` would match ``tests/sub/x.py``."""
+    out, i = [], 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char == "*":
+            if pattern[i:i + 3] == "**/":
+                out.append(r"(?:.*/)?")
+                i += 3
+                continue
+            if pattern[i:i + 2] == "**":
+                out.append(r".*")
+                i += 2
+                continue
+            out.append(r"[^/]*")
+        elif char == "?":
+            out.append(r"[^/]")
+        elif char in ".^$+{}[]()|\\":
+            out.append("\\" + char)
+        else:
+            out.append(char)
+        i += 1
+    return re.compile("^" + "".join(out) + "$")
+
+
+def _strip_dot_slash(path):
+    # Not lstrip("./"): that strips a character set, turning ".env" into "env".
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
+def matches(path, pattern):
+    """gitignore-style match: a pattern without "/" matches the basename
+    anywhere; a pattern with "/" is anchored to the whole path."""
+    path = _strip_dot_slash(str(path).replace(os.sep, "/"))
+    pattern = _strip_dot_slash(pattern.strip())
+    regex = _to_regex(pattern)
+    if regex.match(path):
+        return True
+    return "/" not in pattern and bool(regex.match(path.rsplit("/", 1)[-1]))
 
 
 def _scan(rules_dir):
