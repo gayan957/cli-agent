@@ -55,6 +55,11 @@ SESSION_ID = ""
 # Resolved paths of files Read this session, for read-before-edit.
 READ_FILES = set()
 
+# Path-scoped rules from .claude/rules/ (Phase 5). See harness/rules.py.
+RULES_ENABLED = os.environ.get("VA_RULES", "1") != "0"
+RULES = []              # all discovered rules
+RULES_INJECTED = set()  # names already injected this session
+
 # Which Ollama model to use.
 MODEL = os.environ.get("VA_MODEL", "qwen-coder-32k")
 
