@@ -110,6 +110,28 @@ def test_empty_patterns_are_broken_not_global():
     assert patterns_of(meta) is BROKEN
 
 
+def test_empty_paths_string_is_broken():
+    meta, _ = parse('---\npaths: ""\n---\nx')
+    assert patterns_of(meta) is BROKEN
+
+
+def test_list_frontmatter_is_broken():
+    meta, _ = parse("---\n- src/**\n- lib/**\n---\nx")
+    assert meta is None
+    assert patterns_of(meta) is BROKEN
+
+
+def test_unquoted_leading_star_is_broken_not_global():
+    # "**/*.py" unquoted is a YAML alias error: must not become global.
+    meta, _ = parse("---\npaths: **/*.py\n---\nx")
+    assert patterns_of(meta) is BROKEN
+
+
+def test_other_keys_without_patterns_are_global():
+    meta, _ = parse("---\ndescription: style\n---\nx")
+    assert patterns_of(meta) is None
+
+
 def test_malformed_yaml_is_broken_not_global_and_does_not_raise():
     meta, body = parse("---\npaths: [unclosed\n---\nBody\n")
     assert meta is None
@@ -132,6 +154,27 @@ def test_discovery_finds_subdirectories(clean_state):
 
 def test_missing_rules_dir_returns_empty():
     assert rules.discover() == []
+
+
+def test_discover_populates_config_rules(clean_state):
+    write_rule(project_rules(clean_state), "a.md", "x")
+    returned = rules.discover()
+    assert [rule.name for rule in config.RULES] == ["a.md"]
+    assert returned == config.RULES
+
+
+def test_broken_rule_excluded_and_recorded(clean_state):
+    base = project_rules(clean_state)
+    write_rule(base, "good.md", "fine")
+    write_rule(base, "bad.md", "---\npaths: [unclosed\n---\n# Bad\n")
+    write_rule(base, "empty.md", '---\npaths: ""\n---\n# Empty\n')
+    rules.discover()
+
+    assert [rule.name for rule in config.RULES] == ["good.md"]
+    assert [name for name, _ in config.RULES_BROKEN] == ["bad.md", "empty.md"]
+    assert "parse" in dict(config.RULES_BROKEN)["bad.md"]
+    assert "bad.md" not in [rule.name for rule in rules.global_rules()]
+    assert "# Bad" not in rules.system_text()
 
 
 def test_project_rule_shadows_user_rule(clean_state, tmp_path):
@@ -190,6 +233,8 @@ def test_reset_rules_makes_rules_available_again(three_rules):
 
 def test_rules_disabled_loads_nothing(three_rules, monkeypatch):
     monkeypatch.setattr(config, "RULES_ENABLED", False)
+    assert rules.discover() == []
+    assert config.RULES == []
     assert rules.global_rules() == []
     assert rules.rules_for("tests/a.py") == []
     assert rules.system_text() == ""
@@ -234,3 +279,34 @@ def test_agent_injects_rule_after_tool_result(three_rules, clean_state,
     assert len(injected) == 1                       # second Read: no repeat
     assert roles[injected[0]] == "user"
     assert roles[injected[0] - 1] == "tool"         # right after the result
+
+
+def test_glob_and_grep_do_not_inject(three_rules, clean_state, monkeypatch):
+    (clean_state / "tests").mkdir()
+    (clean_state / "tests" / "test_a.py").write_text("x = 1\n")
+    monkeypatch.setattr(config, "AUTO_APPROVE", True)
+
+    seen = []
+    script = iter([
+        {"content": "", "tool_calls": [
+            {"name": "Glob", "arguments": {"pattern": "*.py",
+                                           "path": "tests"}}]},
+        {"content": "", "tool_calls": [
+            {"name": "Grep", "arguments": {"pattern": "x",
+                                           "path": "tests/test_a.py"}}]},
+        {"content": "Done.", "tool_calls": []},
+    ])
+
+    from va_agent.core import llm
+
+    def chat(messages, tools=None):
+        seen.append([dict(m) for m in messages])
+        return next(script)
+
+    monkeypatch.setattr(llm, "chat", chat)
+    from va_agent.core.agent import run
+    run("search", verbose=False)
+
+    assert not any(m["content"].startswith("[project rule: testing.md]")
+                   for m in seen[-1])
+    assert config.RULES_INJECTED == set()
