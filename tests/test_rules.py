@@ -4,7 +4,7 @@ import pytest
 
 from va_agent.core import config
 from va_agent.harness import rules
-from va_agent.harness.rules import matches, parse, patterns_of
+from va_agent.harness.rules import BROKEN, matches, parse, patterns_of
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +16,7 @@ def clean_state(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "RULES_ENABLED", True)
     monkeypatch.setattr(config, "RULES", [])
     monkeypatch.setattr(config, "RULES_INJECTED", set())
+    monkeypatch.setattr(config, "RULES_BROKEN", [])
     monkeypatch.setattr(rules, "USER_RULES_DIR", str(tmp_path / "home_rules"))
     rules.reset_session()
     yield project
@@ -104,14 +105,15 @@ def test_no_frontmatter_is_global():
     assert body.startswith("# Style")
 
 
-def test_empty_patterns_are_global():
+def test_empty_patterns_are_broken_not_global():
     meta, _ = parse('---\npaths: ["", " "]\n---\nx')
-    assert patterns_of(meta) is None
+    assert patterns_of(meta) is BROKEN
 
 
-def test_malformed_yaml_is_global_and_does_not_raise():
+def test_malformed_yaml_is_broken_not_global_and_does_not_raise():
     meta, body = parse("---\npaths: [unclosed\n---\nBody\n")
-    assert meta == {} and patterns_of(meta) is None
+    assert meta is None
+    assert patterns_of(meta) is BROKEN
     assert body.strip() == "Body"
 
 

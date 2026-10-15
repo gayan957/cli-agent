@@ -5,6 +5,10 @@ global and goes into the system prompt. With patterns it is held back and
 injected only when the agent first touches a matching file, which saves a
 small model's context.
 
+A rule with broken frontmatter is not loaded at all, rather than falling
+back to global: otherwise a rule meant for one folder would silently apply
+to every file. Broken rules are listed by /rules.
+
 Rules are context only. They never grant or deny permission; that stays in
 harness/permissions.py.
 """
@@ -24,6 +28,9 @@ RULES_SUBDIR = os.path.join(".claude", "rules")
 # User-level rules. A module attribute so tests can point it elsewhere.
 USER_RULES_DIR = os.path.join(os.path.expanduser("~"), RULES_SUBDIR)
 
+# patterns_of() result for a rule whose frontmatter or patterns are wrong.
+BROKEN = object()
+
 _FRONTMATTER = re.compile(r"\A﻿?---[ \t]*\r?\n(.*?)^---[ \t]*(?:\r?\n|\Z)",
                           re.DOTALL | re.MULTILINE)
 
@@ -37,21 +44,20 @@ class Rule:
 
 
 def parse(text):
-    """Split a rule file into (frontmatter dict, body). Malformed YAML
-    warns and counts as no frontmatter; it never raises."""
+    """Split a rule file into (meta, body). meta is {} when there is no
+    frontmatter, and None when there is frontmatter but it is malformed
+    or not a mapping. Never raises."""
     match = _FRONTMATTER.match(text)
     if not match:
         return {}, text
     body = text[match.end():]
     try:
         meta = yaml.safe_load(match.group(1))
-    except yaml.YAMLError as error:
-        first = str(error).splitlines()[0] if str(error) else "invalid YAML"
-        console.print(f"[yellow]  rules: bad frontmatter ignored ({first}). "
-                      "Quote patterns that start with *, e.g. "
-                      "paths: \"**/*.py\"[/yellow]")
-        return {}, body
-    return (meta if isinstance(meta, dict) else {}), body
+    except Exception:
+        return None, body
+    if meta is None:
+        return {}, body              # an empty --- --- block
+    return (meta if isinstance(meta, dict) else None), body
 
 
 def _strip_quotes(entry):
@@ -61,15 +67,8 @@ def _strip_quotes(entry):
     return entry
 
 
-def patterns_of(meta):
-    """The rule's patterns, or None for a global rule. Reads ``paths``,
-    then ``globs``; accepts a string, a comma-separated string, or a list."""
-    value = meta.get("paths")
-    if value in (None, "", []):
-        value = meta.get("globs")
-    if value in (None, "", []):
-        return None
-
+def _entries(value):
+    """Non-empty patterns from a string, comma-separated string or list."""
     items = value if isinstance(value, list) else [value]
     found = []
     for item in items:
@@ -79,7 +78,23 @@ def patterns_of(meta):
             part = _strip_quotes(part)
             if part:
                 found.append(part)
-    return found or None
+    return found
+
+
+def patterns_of(meta):
+    """A scoped rule's patterns, None for a global rule, or BROKEN when the
+    frontmatter failed to parse or names paths/globs with nothing in them.
+    Reads ``paths`` first, then ``globs``."""
+    if meta is None:
+        return BROKEN
+    for key in ("paths", "globs"):
+        if key in meta:
+            found = _entries(meta[key])
+            if found:
+                return found
+    if "paths" in meta or "globs" in meta:
+        return BROKEN
+    return None
 
 
 @functools.lru_cache(maxsize=None)
@@ -129,7 +144,8 @@ def matches(path, pattern):
 
 
 def _scan(rules_dir):
-    """Rules under one directory, recursively. Missing dir gives []."""
+    """(name, Rule or (name, reason)) for every rule file under one
+    directory, recursively. A missing directory gives []."""
     if not os.path.isdir(rules_dir):
         return []
     found = []
@@ -148,19 +164,40 @@ def _scan(rules_dir):
                 continue
             meta, body = parse(text)
             name = os.path.relpath(source, rules_dir).replace(os.sep, "/")
-            found.append(Rule(name=name, patterns=patterns_of(meta),
-                              body=body.strip(), source=source))
+            patterns = patterns_of(meta)
+            if patterns is BROKEN:
+                reason = ("frontmatter failed to parse" if meta is None
+                          else "paths:/globs: has no non-empty pattern")
+                found.append((name, (name, reason)))
+            else:
+                found.append((name, Rule(name=name, patterns=patterns,
+                                         body=body.strip(), source=source)))
     return found
 
 
 def discover(project_dir=None):
-    """Find project and user rules, store them in config.RULES and return
-    them. A project rule shadows a user rule with the same name."""
+    """Find project and user rules, store the valid ones in config.RULES
+    and the broken ones in config.RULES_BROKEN, and return the valid ones.
+    A project rule (even a broken one) shadows a user rule of the same
+    name. With rules disabled nothing is scanned."""
+    config.RULES = []
+    config.RULES_BROKEN = []
+    if not config.RULES_ENABLED:
+        return []
+
     project = os.path.join(project_dir or config.SANDBOX, RULES_SUBDIR)
-    by_name = {rule.name: rule for rule in _scan(USER_RULES_DIR)}
-    for rule in _scan(project):
-        by_name[rule.name] = rule
-    config.RULES = sorted(by_name.values(), key=lambda rule: rule.name)
+    by_name = dict(_scan(USER_RULES_DIR))
+    by_name.update(_scan(project))
+
+    for name in sorted(by_name):
+        entry = by_name[name]
+        if isinstance(entry, Rule):
+            config.RULES.append(entry)
+        else:
+            config.RULES_BROKEN.append(entry)
+            console.print(f"[yellow]  rules: {name} not loaded: {entry[1]}. "
+                          "Quote patterns that start with *, e.g. "
+                          "paths: \"**/*.py\"[/yellow]")
     return list(config.RULES)
 
 

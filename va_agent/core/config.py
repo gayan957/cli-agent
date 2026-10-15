@@ -57,8 +57,9 @@ READ_FILES = set()
 
 # Path-scoped rules from .claude/rules/ (Phase 5). See harness/rules.py.
 RULES_ENABLED = os.environ.get("VA_RULES", "1") != "0"
-RULES = []              # all discovered rules
-RULES_INJECTED = set()  # names already injected this session
+RULES = []              # every valid Rule found by discover()
+RULES_INJECTED = set()  # rule names already injected this session
+RULES_BROKEN = []       # (name, reason) for rules that failed to parse
 
 # Which Ollama model to use.
 MODEL = os.environ.get("VA_MODEL", "qwen-coder-32k")
