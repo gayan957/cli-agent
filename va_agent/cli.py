@@ -12,6 +12,8 @@ HELP = """Commands:
   /mode <name>     switch mode: default | acceptEdits | plan | bypassPermissions
   /rewind          list file snapshots and restore to before a step
   /rewind <step>   restore files to how they were before that step
+  /rules           show global, injected and held project rules
+  /clear           forget which rules were injected this session
   /help            show this list
   exit, quit       leave va-agent
 Anything else is sent to the agent as a task."""
@@ -49,11 +51,47 @@ def _slash_command(text):
         else:
             console.print("[yellow]unknown mode; choose one of: "
                           + ", ".join(permissions.MODES) + "[/yellow]")
+    elif parts[0] == "/rules":
+        _show_rules()
+    elif parts[0] == "/clear":
+        rules.reset_session()
+        console.print("cleared: path-scoped rules can inject again")
     elif parts[0] == "/rewind":
         _rewind(parts[1] if len(parts) > 1 else None)
     else:
         console.print(f"[yellow]unknown command {parts[0]}; try /help[/yellow]")
     return True
+
+
+def _show_rules():
+    """Global, injected and held rules. A rule that never fires is this
+    feature's main failure mode, so this is how to check."""
+    if not config.RULES_ENABLED:
+        console.print("[yellow]rules are off (VA_RULES=0)[/yellow]")
+        return
+    every = config.RULES
+    sections = [
+        ("Global (always loaded):",
+         [(r.name, "") for r in every if r.patterns is None]),
+        ("Injected this session:",
+         [(r.name, f"(matched {rules.matched_path(r)})"
+                   if rules.matched_path(r) else "")
+          for r in every
+          if r.patterns is not None and r.name in config.RULES_INJECTED]),
+        ("Held (not yet matched):",
+         [(r.name, "paths: " + ", ".join(r.patterns))
+          for r in every
+          if r.patterns is not None and r.name not in config.RULES_INJECTED]),
+    ]
+    width = max((len(name) for _, items in sections for name, _ in items),
+                default=0) + 2
+    for number, (title, items) in enumerate(sections):
+        if number:
+            console.print("")
+        console.print(title, markup=False)
+        for name, note in items or [("(none)", "")]:
+            console.print(f"  {name.ljust(width)}{note}".rstrip(),
+                          markup=False, highlight=False)
 
 
 def _rewind(step=None):
