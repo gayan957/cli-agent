@@ -281,3 +281,43 @@ def context_messages(event: str, result: HookResult) -> list:
     models ignore system messages that arrive mid-conversation."""
     return [{"role": "user", "content": f"[hook: {event}]\n\n{text}"}
             for text in result.context]
+
+
+MAX_STOP_CONTINUATIONS = 3
+
+_stop_continuations = 0
+_session_context = []
+
+
+def reset_hooks() -> None:
+    """Reset the Stop-hook continuation counter. Called at the start of
+    every run. (Not reset_session/reset_rules: sibling modules own those.)"""
+    global _stop_continuations
+    _stop_continuations = 0
+
+
+def stop_may_continue() -> bool:
+    """Count one Stop-forced continuation; False once the limit is used."""
+    global _stop_continuations
+    if _stop_continuations >= MAX_STOP_CONTINUATIONS:
+        return False
+    _stop_continuations += 1
+    return True
+
+
+def stop_hook_active() -> bool:
+    """True once a Stop hook has already forced a continuation this run."""
+    return _stop_continuations > 0
+
+
+def start_session(source: str = "startup") -> HookResult:
+    """Fire SessionStart and keep its context for the system prompt."""
+    result = fire("SessionStart", {"source": source})
+    _session_context[:] = result.context
+    return result
+
+
+def system_text() -> str:
+    """SessionStart context, formatted for the end of the system prompt."""
+    return "".join(f"\n\n[hook: SessionStart]\n\n{text}"
+                   for text in _session_context)

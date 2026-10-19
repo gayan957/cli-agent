@@ -4,7 +4,7 @@ import sys
 
 from va_agent.core import config
 from va_agent.core.agent import run
-from va_agent.harness import permissions, rules, snapshots
+from va_agent.harness import hooks, permissions, rules, snapshots
 from va_agent.ui.console import banner, console, summary
 
 HELP = """Commands:
@@ -126,18 +126,37 @@ def _rewind(step=None):
     console.print(f"[green]rewound {len(done)} file change(s)[/green]")
 
 
+def _submit(task):
+    """Run *task* unless a UserPromptSubmit hook denies it."""
+    check = hooks.fire("UserPromptSubmit", {"prompt": task})
+    if check.decision == "deny":
+        console.print(f"[yellow]prompt blocked by hook: {check.reason}"
+                      "[/yellow]")
+        return
+    summary(run(task, context=hooks.context_messages("UserPromptSubmit",
+                                                     check)))
+
+
 def main(argv=None):
     argv, mode = _consume_flags(list(sys.argv[1:] if argv is None else argv))
     permissions.load_settings()
+    hooks.load_hooks()
     rules.discover()
     rules.reset_rules()
     snapshots.new_session()
     if mode:
         config.MODE = mode          # the flag beats settings.json
     banner(config.SANDBOX, config.MODEL, config.MODE)
+    hooks.start_session()
+    try:
+        return _session(argv)
+    finally:
+        hooks.fire("SessionEnd", {"reason": "exit"})
 
+
+def _session(argv):
     if argv:
-        summary(run(" ".join(argv)))
+        _submit(" ".join(argv))
         return 0
 
     while True:
@@ -151,7 +170,7 @@ def main(argv=None):
         if task.startswith("/"):
             _slash_command(task)
         elif task:
-            summary(run(task))
+            _submit(task)
 
 
 if __name__ == "__main__":

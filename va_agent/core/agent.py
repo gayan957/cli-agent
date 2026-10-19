@@ -76,17 +76,20 @@ def _new_stats(task):
             "edit_attempts": 0, "edit_failures": 0, "peak_tokens": 0}
 
 
-def run(task, verbose=True):
-    """Run one task to completion. Returns a stats dict."""
+def run(task, verbose=True, context=None):
+    """Run one task to completion. Returns a stats dict. *context* is extra
+    messages to follow the task, e.g. UserPromptSubmit hook output."""
     checkpoint(task)
+    hooks.reset_hooks()
 
     # Built per run so VA_EDIT_MODE / VA_TODOS changes take effect.
     tools = registry.build_registry()
     schemas = registry.build_schemas()
 
     messages = [{"role": "system",
-                 "content": system_prompt() + rules.system_text()},
-                {"role": "user", "content": task}]
+                 "content": system_prompt() + rules.system_text()
+                            + hooks.system_text()},
+                {"role": "user", "content": task}, *(context or [])]
     stats = _new_stats(task)
     started = time.time()
 
@@ -119,6 +122,25 @@ def run(task, verbose=True):
             if reply["content"].strip():
                 if verbose:
                     console.print(reply["content"])
+                # A Stop hook can refuse the finish and send the model back
+                # to work, at most MAX_STOP_CONTINUATIONS times per run.
+                stop = hooks.fire("Stop", {"stop_hook_active":
+                                           hooks.stop_hook_active()})
+                if stop.decision == "deny":
+                    if hooks.stop_may_continue():
+                        messages.append({"role": "user",
+                                         "content": f"[hook: Stop]\n\n"
+                                                    f"{stop.reason}"})
+                        if verbose:
+                            console.print(f"[yellow]  Stop hook: continuing "
+                                          f"({stop.reason})[/yellow]")
+                        continue
+                    stats["stop_hook_limit"] = True
+                    if verbose:
+                        console.print(
+                            f"[yellow]  Stop hook still objecting after "
+                            f"{hooks.MAX_STOP_CONTINUATIONS} continuations; "
+                            f"finishing anyway.[/yellow]")
                 stats["finished"] = True
                 break
             # A blank reply (no text, no tool call) is never a real finish.
