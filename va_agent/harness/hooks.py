@@ -11,6 +11,10 @@ untrusted repository can run anything.
 import json
 import os
 import re
+import signal
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 
 from va_agent.core import config
 from va_agent.ui.console import console
@@ -18,6 +22,15 @@ from va_agent.ui.console import console
 EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
           "PreCompact", "Stop", "SessionEnd")
 TOOL_EVENTS = {"PreToolUse", "PostToolUse"}
+BLOCKING = {"UserPromptSubmit", "PreToolUse", "PreCompact", "Stop"}
+DECISIONS = ("allow", "deny", "ask")
+
+
+@dataclass
+class HookResult:
+    decision: str | None = None     # allow | deny | ask | None
+    reason: str = ""
+    context: list = field(default_factory=list)
 
 
 def _warn(message: str) -> None:
@@ -115,3 +128,132 @@ def load_hooks(project_dir: str | None = None) -> dict:
         if valid:
             config.HOOKS[event] = valid
     return config.HOOKS
+
+
+def _project_dir() -> str:
+    return os.path.realpath(config.SANDBOX)
+
+
+def _expand(command: str, project: str) -> str:
+    return command.replace("${CLAUDE_PROJECT_DIR}", project)
+
+
+def _selected(event: str, payload: dict, default_timeout) -> list:
+    """(command, timeout) pairs to run: matching entries, duplicates
+    removed, in configuration order."""
+    tool = payload.get("tool_name", "")
+    project = _project_dir()
+    chosen, seen = [], set()
+    for entry in config.HOOKS.get(event, []):
+        matcher = entry.get("matcher")
+        if event in TOOL_EVENTS and matcher is not None:
+            try:
+                if not re.fullmatch(matcher, tool):
+                    continue
+            except re.error:
+                continue
+        for hook in entry.get("hooks", []):
+            command = _expand(hook["command"], project)
+            if command in seen:
+                continue
+            seen.add(command)
+            chosen.append((command, hook.get("timeout") or default_timeout))
+    return chosen
+
+
+def _run(command: str, stdin: str, timeout: float, project: str) -> dict:
+    """Run one hook. Own process group, so a timeout kills everything it
+    started instead of waiting on a child that holds the pipes open."""
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": project}
+    try:
+        proc = subprocess.Popen(command, shell=True, cwd=project, env=env,
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True,
+                                start_new_session=True)
+    except OSError as error:
+        return {"code": None, "stdout": "", "stderr": str(error),
+                "timed_out": False}
+    try:
+        out, err = proc.communicate(stdin, timeout=timeout)
+        return {"code": proc.returncode, "stdout": out, "stderr": err,
+                "timed_out": False}
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
+        proc.communicate()
+        return {"code": None, "stdout": "", "stderr": "", "timed_out": True}
+
+
+def _structured(stdout: str):
+    """hookSpecificOutput from stdout, {} for JSON without it, or None
+    when stdout is not a JSON object (then it is plain text)."""
+    try:
+        data = json.loads(stdout)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    inner = data.get("hookSpecificOutput")
+    return inner if isinstance(inner, dict) else {}
+
+
+def fire(event: str, payload: dict | None = None,
+         timeout: float | None = None) -> HookResult:
+    """Run every hook matching *event* in parallel and combine the answers.
+    A deny wins; otherwise the last allow/ask applies; context from every
+    hook is kept in order. Never raises and never waits past a timeout."""
+    result = HookResult()
+    if not config.HOOKS_ENABLED or event not in EVENTS:
+        return result
+
+    payload = {"session_id": config.SESSION_ID, "cwd": _project_dir(),
+               "hook_event_name": event, **(payload or {})}
+    chosen = _selected(event, payload,
+                       timeout if timeout is not None else config.HOOK_TIMEOUT)
+    if not chosen:
+        return result
+
+    stdin = json.dumps(payload, default=str) + "\n"
+    project = _project_dir()
+    with ThreadPoolExecutor(max_workers=len(chosen)) as pool:
+        runs = list(pool.map(lambda item: _run(item[0], stdin, item[1], project),
+                             chosen))
+
+    blocking = event in BLOCKING
+    denials = []
+    for (command, limit), run in zip(chosen, runs):
+        out, err = run["stdout"].strip(), run["stderr"].strip()
+        if run["timed_out"]:
+            result.context.append(f"[hook timed out after {limit:g}s] {command}")
+            continue
+        if run["code"] == 0:
+            inner = _structured(out) if out else {}
+            if inner is None:
+                result.context.append(out)
+                continue
+            extra = inner.get("additionalContext")
+            if isinstance(extra, str) and extra.strip():
+                result.context.append(extra.strip())
+            decision = inner.get("permissionDecision")
+            if blocking and decision in DECISIONS:
+                reason = str(inner.get("permissionDecisionReason") or "")
+                if decision == "deny":
+                    denials.append(reason or f"denied by hook: {command}")
+                else:
+                    result.decision, result.reason = decision, reason
+            continue
+        if run["code"] == 2:
+            if blocking:
+                denials.append(err or f"blocked by hook: {command}")
+            elif err or out:
+                result.context.append(err or out)
+            continue
+        code = run["code"] if run["code"] is not None else "not started"
+        result.context.append(f"[hook error: exit {code}] {command}"
+                              + (f"\n{err}" if err else ""))
+
+    if denials:
+        result.decision, result.reason = "deny", "\n".join(denials)
+    return result
