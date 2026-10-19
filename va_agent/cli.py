@@ -14,6 +14,7 @@ HELP = """Commands:
   /rewind <step>   restore files to how they were before that step
   /rules           show global, injected and held project rules
   /clear           forget which rules were injected this session
+  /hooks           list configured hooks by event
   /help            show this list
   exit, quit       leave va-agent
 Anything else is sent to the agent as a task."""
@@ -56,6 +57,8 @@ def _slash_command(text):
     elif parts[0] == "/clear":
         rules.reset_rules()
         console.print("cleared: path-scoped rules can inject again")
+    elif parts[0] == "/hooks":
+        _show_hooks()
     elif parts[0] == "/rewind":
         _rewind(parts[1] if len(parts) > 1 else None)
     else:
@@ -98,6 +101,28 @@ def _show_rules():
         for name, note in items:
             console.print(f"  {name.ljust(width)}{note}".rstrip(),
                           markup=False, highlight=False)
+
+
+def _show_hooks() -> None:
+    """Configured hooks grouped by event: matcher, command, timeout."""
+    state = "enabled" if config.HOOKS_ENABLED else "disabled (VA_HOOKS=0)"
+    console.print(f"Hooks are {state}.", markup=False)
+    if not config.HOOKS:
+        console.print("no hooks configured in .claude/settings.json",
+                      markup=False)
+        return
+    for event in hooks.EVENTS:
+        entries = config.HOOKS.get(event)
+        if not entries:
+            continue
+        console.print(f"\n{event}:", markup=False)
+        for entry in entries:
+            matcher = entry["matcher"] or "*"
+            for hook in entry["hooks"]:
+                limit = hook["timeout"] or config.HOOK_TIMEOUT
+                console.print(f"  [{matcher}]  {hook['command']}  "
+                              f"(timeout {limit:g}s)",
+                              markup=False, highlight=False)
 
 
 def _rewind(step=None):
