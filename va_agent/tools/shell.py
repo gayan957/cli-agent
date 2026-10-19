@@ -3,6 +3,9 @@
 One long-lived ``/bin/bash`` reads commands on stdin. After each command we
 print a unique marker followed by ``$?``; output is everything before the
 marker. A reader thread feeds a queue so a hung command can time out.
+
+Which commands may run is policy, not this module's job: see the
+block-dangerous.sh PreToolUse hook and harness/permissions.py.
 """
 
 import os
@@ -14,7 +17,6 @@ import uuid
 
 from va_agent.core import config
 
-BLOCKED = ["rm -rf", "sudo", "shutdown", "mkfs", "dd if=", ":(){", "> /dev/"]
 MAX_OUTPUT_CHARS = 30_000
 MAX_TIMEOUT = 600
 
@@ -66,8 +68,6 @@ def _ensure():
 def Bash(command, timeout=120):
     """Run *command* in the persistent shell. Returns ``exit_code=N`` and
     the combined stdout/stderr, capped at 30,000 characters."""
-    if any(bad in command for bad in BLOCKED):
-        return "BLOCKED: this command is not allowed"
     try:
         timeout = min(max(float(timeout), 1), MAX_TIMEOUT)
     except (TypeError, ValueError):

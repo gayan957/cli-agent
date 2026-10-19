@@ -17,6 +17,7 @@ import fixture                                  # noqa: E402
 
 from va_agent.core import config                # noqa: E402
 from va_agent.core.agent import run             # noqa: E402
+from va_agent.harness import hooks              # noqa: E402
 from va_agent.harness import permissions        # noqa: E402
 from va_agent.harness import rules              # noqa: E402
 from va_agent.harness import snapshots          # noqa: E402
@@ -86,11 +87,22 @@ def upgrade_header(path):
     print(f"Upgraded {path} to {len(COLUMNS)} columns", flush=True)
 
 
+# The hardcoded command blocklist in tools/shell.py became this hook in
+# Phase 6. Fixtures have no settings.json, so wire just this guard into every
+# run to keep dangerous commands blocked while unattended. No other hook
+# runs, so results stay comparable with earlier systems.
+GUARD_HOOK = os.path.join(HERE, "..", ".claude", "hooks", "block-dangerous.sh")
+
+
 def reset_run_state(workdir):
     """Everything that must not leak from one run into the next."""
     config.SANDBOX = workdir
     permissions.reset_session()
     permissions.load_settings(workdir)
+    hooks.load_hooks(workdir)
+    config.HOOKS.setdefault("PreToolUse", []).append(
+        {"matcher": "Bash",
+         "hooks": [{"command": os.path.abspath(GUARD_HOOK), "timeout": 10}]})
     shell.reset()
     todo.reset()
     config.READ_FILES.clear()
