@@ -61,6 +61,11 @@ RULES = []              # every valid Rule found by discover()
 RULES_INJECTED = set()  # rule names already injected this session
 RULES_BROKEN = []       # (name, reason) for rules that failed to parse
 
+# Lifecycle hooks from .claude/settings.json (Phase 6). See harness/hooks.py.
+HOOKS_ENABLED = os.environ.get("VA_HOOKS", "1") != "0"
+HOOKS = {}              # event name -> list of matcher entries
+HOOK_TIMEOUT = int(os.environ.get("VA_HOOK_TIMEOUT", "60"))
+
 # Which Ollama model to use.
 MODEL = os.environ.get("VA_MODEL", "qwen-coder-32k")
 
