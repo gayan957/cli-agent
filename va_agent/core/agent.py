@@ -4,7 +4,7 @@ import time
 
 from va_agent.core import config
 from va_agent.core import llm
-from va_agent.harness import rules, snapshots
+from va_agent.harness import hooks, rules, snapshots
 from va_agent.harness.permissions import approve, checkpoint
 from va_agent.tools import registry
 from va_agent.ui.console import console, describe_call
@@ -143,9 +143,24 @@ def run(task, verbose=True):
             if verbose:
                 console.print(describe_call(name, arguments, step + 1))
 
-            if not approve(name, arguments):
+            # PreToolUse hooks sit in front of the permission system: deny
+            # stops the call, allow skips approve(), anything else falls
+            # through to it unchanged.
+            hook_tool = hooks.tool_payload(name, arguments)
+            pre = hooks.fire("PreToolUse", hook_tool)
+            if pre.decision == "deny":
+                stats["tool_failures"] += 1
+                messages.append({"role": "tool",
+                                 "content": f"Blocked by hook: {pre.reason}"})
+                messages.extend(hooks.context_messages("PreToolUse", pre))
+                if verbose:
+                    console.print(f"[yellow]  blocked by hook: "
+                                  f"{pre.reason}[/yellow]")
+                continue
+            if pre.decision != "allow" and not approve(name, arguments):
                 messages.append({"role": "tool",
                                  "content": "User denied this action."})
+                messages.extend(hooks.context_messages("PreToolUse", pre))
                 continue
 
             is_edit = name in registry.EDIT_TOOLS
@@ -159,9 +174,11 @@ def run(task, verbose=True):
                     stats["edit_failures"] += 1
                 result = f"ERROR: {type(error).__name__}: {error}"
                 messages.append({"role": "tool", "content": str(result)})
+                messages.extend(hooks.context_messages("PreToolUse", pre))
                 continue
 
             messages.append({"role": "tool", "content": str(result)})
+            messages.extend(hooks.context_messages("PreToolUse", pre))
 
             # Path-scoped rules arrive right after the file they apply to.
             # role "user": several local models ignore mid-chat system turns.
@@ -173,6 +190,15 @@ def run(task, verbose=True):
                 rules.mark_injected(rule, path)
                 if verbose:
                     console.print(f"[dim]  rule loaded: {rule.name}[/dim]")
+
+            # PostToolUse: e.g. selftest.sh exits 2 and its failing test
+            # output reaches the model here without the model asking.
+            post = hooks.fire("PostToolUse",
+                              {**hook_tool, "tool_response": str(result)})
+            messages.extend(hooks.context_messages("PostToolUse", post))
+            if verbose and post.context:
+                console.print(f"[dim]  hook feedback: {len(post.context)} "
+                              f"message(s)[/dim]")
     else:
         if verbose:
             console.print(

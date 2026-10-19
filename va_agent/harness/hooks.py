@@ -257,3 +257,27 @@ def fire(event: str, payload: dict | None = None,
     if denials:
         result.decision, result.reason = "deny", "\n".join(denials)
     return result
+
+
+# Old tool names the model may still call, mapped to the Claude Code names
+# hooks match on, so a "Bash" matcher also guards run_command.
+CANONICAL = {"read_file": "Read", "write_file": "Write", "run_command": "Bash",
+             "grep": "Grep", "list_files": "Glob"}
+FILE_PATH_TOOLS = {"Read", "Write", "Edit"}
+
+
+def tool_payload(name: str, arguments: dict) -> dict:
+    """tool_name and tool_input as a Claude Code hook expects them."""
+    tool = CANONICAL.get(name, name)
+    tool_input = dict(arguments or {})
+    if tool in FILE_PATH_TOOLS and "file_path" not in tool_input \
+            and "path" in tool_input:
+        tool_input["file_path"] = tool_input.pop("path")
+    return {"tool_name": tool, "tool_input": tool_input}
+
+
+def context_messages(event: str, result: HookResult) -> list:
+    """Hook context as conversation messages. role "user": several local
+    models ignore system messages that arrive mid-conversation."""
+    return [{"role": "user", "content": f"[hook: {event}]\n\n{text}"}
+            for text in result.context]
