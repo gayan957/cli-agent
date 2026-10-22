@@ -66,6 +66,14 @@ HOOKS_ENABLED = os.environ.get("VA_HOOKS", "1") != "0"
 HOOKS = {}              # event name -> list of matcher entries
 HOOK_TIMEOUT = int(os.environ.get("VA_HOOK_TIMEOUT", "60"))
 
+# Skills from .claude/skills/ (Phase 7). See harness/skills.py.
+SKILLS_ENABLED = os.environ.get("VA_SKILLS", "1") != "0"
+SKILLS = {}             # name -> Skill
+SKILLS_LOADED = set()   # names whose body is in context this session
+SKILLS_BROKEN = []      # (path, reason)
+SKILLS_WARN_ABOVE = int(os.environ.get("VA_SKILLS_WARN", "15"))
+SKILL_INVOCATIONS = []  # (skill_name, task_excerpt) for logging
+
 # Which Ollama model to use.
 MODEL = os.environ.get("VA_MODEL", "qwen-coder-32k")
 
