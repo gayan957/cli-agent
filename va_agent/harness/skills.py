@@ -159,3 +159,70 @@ def _stat(paths):
         except OSError:
             pass
     return stamps
+
+
+# ---------------------------------------------------------------- disclosure
+
+_task = ""              # the current task, for the invocation log
+_pending = None         # (name, body) loaded by the last Skill call
+
+
+def begin_task(task: str) -> None:
+    """Remember the task, so invocations can be logged against it."""
+    global _task
+    _task = task
+
+
+def prompt_block() -> str:
+    """Level 1: one line per skill for the system prompt. No bodies."""
+    if not config.SKILLS_ENABLED or not config.SKILLS:
+        return ""
+    lines = ["Available skills (call the Skill tool to load one):"]
+    lines += [f"- {skill.name}: {skill.description}"
+              for skill in config.SKILLS.values()]
+    return "\n".join(lines)
+
+
+def message(name: str, body: str) -> dict:
+    """How a skill body enters the conversation. role "user": several
+    local models ignore system messages that arrive mid-conversation."""
+    return {"role": "user", "content": f"[skill: {name}]\n\n{body}"}
+
+
+def _excerpt(task: str) -> str:
+    task = " ".join(str(task).split())
+    return task if len(task) <= 60 else task[:57] + "..."
+
+
+def load(name: str, task: str | None = None):
+    """Mark *name* loaded and log the invocation. Returns its body, or
+    None when it is already loaded. Raises for an unknown name."""
+    skill = config.SKILLS.get(name)
+    if skill is None:
+        available = ", ".join(config.SKILLS) or "(none)"
+        raise ValueError(f"Unknown skill {name!r}. Available skills: "
+                         f"{available}")
+    config.SKILL_INVOCATIONS.append(
+        (name, _excerpt(_task if task is None else task)))
+    if name in config.SKILLS_LOADED:
+        return None
+    config.SKILLS_LOADED.add(name)
+    return skill.body
+
+
+def skill_tool(name: str) -> str:
+    """The Skill tool. Level 2: load a skill's instructions by name."""
+    global _pending
+    body = load(str(name).strip())
+    if body is None:
+        return (f"Skill {name!r} is already loaded earlier in this "
+                "conversation; follow those instructions.")
+    _pending = (name, body)
+    return body
+
+
+def take_pending():
+    """(name, body) from the last Skill call that loaded a body, once."""
+    global _pending
+    pending, _pending = _pending, None
+    return pending

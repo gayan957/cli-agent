@@ -21,7 +21,7 @@ MODES = ("default", "acceptEdits", "plan", "bypassPermissions")
 
 # Both the Claude Code names and the old names are callable (see
 # tools/registry.py), so every set lists both.
-READ_ONLY = {"Read", "Glob", "Grep", "TodoWrite",
+READ_ONLY = {"Read", "Glob", "Grep", "TodoWrite", "Skill",
              "list_files", "read_file", "grep"}
 MUTATING = {"Write", "Edit", "Bash", "write_file", "run_command"}
 EDIT_TOOLS = {"Write", "Edit", "write_file"}

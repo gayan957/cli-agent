@@ -11,6 +11,7 @@ still emit them, and old ``path`` arguments are accepted for ``file_path``.
 """
 
 from va_agent.core import config
+from va_agent.harness import skills
 from va_agent.tools import fs, shell, todo
 
 EDIT_MODES = ("write", "edit", "both")
@@ -60,7 +61,14 @@ def build_registry():
         tools["Edit"] = _file_path_compat(fs.Edit)
     if config.TODOS:
         tools["TodoWrite"] = todo.TodoWrite
+    if _skills_offered():
+        tools["Skill"] = skills.skill_tool
     return tools
+
+
+def _skills_offered():
+    """The Skill tool exists only when there is a skill to load."""
+    return config.SKILLS_ENABLED and bool(config.SKILLS)
 
 
 def _schema(name, description, properties, required):
@@ -153,6 +161,14 @@ TODO_WRITE = _schema(
     ["todos"])
 
 
+SKILL = _schema(
+    "Skill",
+    "Load a skill's step-by-step instructions by name. Call it when the "
+    "task matches one of the available skills listed in your instructions.",
+    {"name": _string("The skill's name, exactly as listed")},
+    ["name"])
+
+
 def build_schemas():
     """JSON schemas for this run, honouring EDIT_MODE and TODOS."""
     mode = edit_mode()
@@ -164,4 +180,6 @@ def build_schemas():
     schemas += [BASH, GLOB, GREP]
     if config.TODOS:
         schemas.append(TODO_WRITE)
+    if _skills_offered():
+        schemas.append(SKILL)
     return schemas

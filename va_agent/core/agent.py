@@ -4,7 +4,7 @@ import time
 
 from va_agent.core import config
 from va_agent.core import llm
-from va_agent.harness import hooks, rules, snapshots
+from va_agent.harness import hooks, rules, skills, snapshots
 from va_agent.harness.permissions import approve, checkpoint
 from va_agent.tools import registry
 from va_agent.ui.console import console, describe_call
@@ -69,6 +69,11 @@ def _touched_path(name, arguments):
     return path if isinstance(path, str) and path else None
 
 
+def _skills_text():
+    block = skills.prompt_block()
+    return f"\n\n{block}" if block else ""
+
+
 def _new_stats(task):
     return {"task": task, "steps": 0, "tool_calls": 0,
             "tool_failures": 0, "seconds": 0.0, "finished": False,
@@ -81,6 +86,7 @@ def run(task, verbose=True, context=None):
     messages to follow the task, e.g. UserPromptSubmit hook output."""
     checkpoint(task)
     hooks.reset_hooks()
+    skills.begin_task(task)
 
     # Built per run so VA_EDIT_MODE / VA_TODOS changes take effect.
     tools = registry.build_registry()
@@ -88,7 +94,7 @@ def run(task, verbose=True, context=None):
 
     messages = [{"role": "system",
                  "content": system_prompt() + rules.system_text()
-                            + hooks.system_text()},
+                            + hooks.system_text() + _skills_text()},
                 {"role": "user", "content": task}, *(context or [])]
     stats = _new_stats(task)
     started = time.time()
@@ -199,7 +205,14 @@ def run(task, verbose=True, context=None):
                 messages.extend(hooks.context_messages("PreToolUse", pre))
                 continue
 
+            # A newly loaded skill's body arrives as a user message; the
+            # tool result just says so, so the body is not sent twice.
+            loaded = skills.take_pending() if name == "Skill" else None
+            if loaded:
+                result = f"Loaded skill {loaded[0]!r}; its instructions follow."
             messages.append({"role": "tool", "content": str(result)})
+            if loaded:
+                messages.append(skills.message(*loaded))
             messages.extend(hooks.context_messages("PreToolUse", pre))
 
             # Path-scoped rules arrive right after the file they apply to.
