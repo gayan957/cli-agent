@@ -87,6 +87,45 @@ def _load_skill(path, origin):
                  origin=origin)
 
 
+def _first_line(body):
+    """The first non-empty body line, without a markdown heading mark."""
+    for line in body.splitlines():
+        line = line.strip().lstrip("#").strip()
+        if line:
+            return line[:MAX_DESCRIPTION]
+    return ""
+
+
+def _load_command(path):
+    """A Skill from a bare .claude/commands/<name>.md, or (path, reason).
+    The filename stem is the name; frontmatter is optional and a missing
+    description defaults to the first non-empty body line."""
+    text, problem = _read(path)
+    if problem:
+        return path, problem
+    meta, body = rules.parse(text)
+    if meta is None:
+        return path, "frontmatter failed to parse"
+    name = os.path.splitext(os.path.basename(path))[0]
+    description = meta.get("description") or _first_line(body)
+    problem = validate(name, description)
+    if problem:
+        return path, problem
+    return Skill(name=name, description=" ".join(str(description).split()),
+                 body=body.strip(), source=path,
+                 directory=os.path.dirname(path), origin="project")
+
+
+def _command_files(commands_dir):
+    """<commands_dir>/*.md, top level only."""
+    if not os.path.isdir(commands_dir):
+        return []
+    return [os.path.abspath(os.path.join(commands_dir, name))
+            for name in sorted(os.listdir(commands_dir))
+            if name.endswith(".md")
+            and os.path.isfile(os.path.join(commands_dir, name))]
+
+
 def _skill_files(skills_dir):
     """<skills_dir>/*/SKILL.md, exactly that name, one level deep only."""
     if not os.path.isdir(skills_dir):
@@ -103,9 +142,9 @@ def _skill_files(skills_dir):
 
 def _watched(project):
     """Every file discovery reads, for hot reload."""
-    files = (_skill_files(USER_SKILLS_DIR)
-             + _skill_files(os.path.join(project, SKILLS_SUBDIR)))
-    return files
+    return (_command_files(os.path.join(project, COMMANDS_SUBDIR))
+            + _skill_files(USER_SKILLS_DIR)
+            + _skill_files(os.path.join(project, SKILLS_SUBDIR)))
 
 
 _scanned_dir = None     # project dir of the last discover(), for reload
@@ -129,7 +168,13 @@ def discover(project_dir=None) -> dict:
 
     project = project_dir or config.SANDBOX
     found = {}
-    # Later entries win: user skills, then project skills.
+    # Later entries win: commands, then user skills, then project skills.
+    for path in _command_files(os.path.join(project, COMMANDS_SUBDIR)):
+        command = _load_command(path)
+        if isinstance(command, Skill):
+            found[command.name] = command
+        else:
+            _report(*command)
     for origin, base in (("user", USER_SKILLS_DIR),
                          ("project", os.path.join(project, SKILLS_SUBDIR))):
         for path in _skill_files(base):
@@ -165,12 +210,25 @@ def _stat(paths):
 
 _task = ""              # the current task, for the invocation log
 _pending = None         # (name, body) loaded by the last Skill call
+# Skills whose body is in the current run's conversation. Each run starts a
+# fresh conversation, so "already loaded" is per run; config.SKILLS_LOADED
+# is the session-wide record shown by /skills.
+_in_context = set()
+
+_PREFIX = "[skill: "
 
 
-def begin_task(task: str) -> None:
-    """Remember the task, so invocations can be logged against it."""
-    global _task
+def begin_task(task: str, context=None) -> None:
+    """Start a run: remember the task for the invocation log, and note
+    skills already in its opening messages (e.g. loaded with /name)."""
+    global _task, _pending
     _task = task
+    _pending = None
+    _in_context.clear()
+    for item in context or []:
+        content = str(item.get("content", ""))
+        if content.startswith(_PREFIX) and "]" in content:
+            _in_context.add(content[len(_PREFIX):content.index("]")])
 
 
 def prompt_block() -> str:
@@ -194,19 +252,36 @@ def _excerpt(task: str) -> str:
     return task if len(task) <= 60 else task[:57] + "..."
 
 
-def load(name: str, task: str | None = None):
-    """Mark *name* loaded and log the invocation. Returns its body, or
-    None when it is already loaded. Raises for an unknown name."""
+def _find(name):
     skill = config.SKILLS.get(name)
     if skill is None:
         available = ", ".join(config.SKILLS) or "(none)"
         raise ValueError(f"Unknown skill {name!r}. Available skills: "
                          f"{available}")
-    config.SKILL_INVOCATIONS.append(
-        (name, _excerpt(_task if task is None else task)))
-    if name in config.SKILLS_LOADED:
-        return None
+    return skill
+
+
+def _record(name, task):
     config.SKILLS_LOADED.add(name)
+    config.SKILL_INVOCATIONS.append((name, _excerpt(task)))
+
+
+def load(name: str):
+    """For the Skill tool: log the call and return the body, or None when
+    it is already in this run's conversation. Raises for an unknown name."""
+    skill = _find(name)
+    _record(name, _task)
+    if name in _in_context:
+        return None
+    _in_context.add(name)
+    return skill.body
+
+
+def invoke(name: str, task: str) -> str:
+    """For /name: log the call and return the body, which the new run
+    will start with. Raises for an unknown name."""
+    skill = _find(name)
+    _record(name, task)
     return skill.body
 
 
@@ -226,3 +301,27 @@ def take_pending():
     global _pending
     pending, _pending = _pending, None
     return pending
+
+
+# ---------------------------------------------------------------- reload
+
+def maybe_reload() -> bool:
+    """Re-stat every skill and command file; rediscover if any changed,
+    appeared or disappeared. Called before each run, so editing a skill
+    never needs a restart. Does nothing before the first discover()."""
+    if _scanned_dir is None or not config.SKILLS_ENABLED:
+        return False
+    if _stat(_watched(_scanned_dir)) == _mtimes:
+        return False
+    discover(_scanned_dir)
+    return True
+
+
+def reset_skills() -> None:
+    """Forget which skills are loaded and the invocation log. (Not
+    reset_session/reset_rules/reset_hooks: sibling modules own those.)"""
+    global _pending
+    config.SKILLS_LOADED.clear()
+    config.SKILL_INVOCATIONS.clear()
+    _in_context.clear()
+    _pending = None

@@ -86,7 +86,7 @@ def run(task, verbose=True, context=None):
     messages to follow the task, e.g. UserPromptSubmit hook output."""
     checkpoint(task)
     hooks.reset_hooks()
-    skills.begin_task(task)
+    skills.begin_task(task, context)
 
     # Built per run so VA_EDIT_MODE / VA_TODOS changes take effect.
     tools = registry.build_registry()

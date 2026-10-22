@@ -4,7 +4,7 @@ import sys
 
 from va_agent.core import config
 from va_agent.core.agent import run
-from va_agent.harness import hooks, permissions, rules, snapshots
+from va_agent.harness import hooks, permissions, rules, skills, snapshots
 from va_agent.ui.console import banner, console, summary
 
 HELP = """Commands:
@@ -15,6 +15,7 @@ HELP = """Commands:
   /rules           show global, injected and held project rules
   /clear           forget which rules were injected this session
   /hooks           list configured hooks by event
+  /<skill> [task]  load a skill (or .claude/commands file) and run the task
   /help            show this list
   exit, quit       leave va-agent
 Anything else is sent to the agent as a task."""
@@ -61,6 +62,8 @@ def _slash_command(text):
         _show_hooks()
     elif parts[0] == "/rewind":
         _rewind(parts[1] if len(parts) > 1 else None)
+    elif _skill_command(text):
+        pass
     else:
         console.print(f"[yellow]unknown command {parts[0]}; try /help[/yellow]")
     return True
@@ -151,15 +154,30 @@ def _rewind(step=None):
     console.print(f"[green]rewound {len(done)} file change(s)[/green]")
 
 
-def _submit(task):
-    """Run *task* unless a UserPromptSubmit hook denies it."""
+def _skill_command(text):
+    """/name [task]: load skill *name* directly and run the rest of the
+    line as the task. Returns False if no skill has that name."""
+    skills.maybe_reload()
+    head, _, rest = text.strip().partition(" ")
+    name, rest = head[1:], rest.strip()
+    if name not in config.SKILLS:
+        return False
+    body = skills.invoke(name, rest or head)
+    _submit(rest or f"Follow the {name} skill's instructions.",
+            [skills.message(name, body)])
+    return True
+
+
+def _submit(task, extra=None):
+    """Run *task* unless a UserPromptSubmit hook denies it. *extra* is
+    context to follow the task, e.g. a skill loaded with /name."""
     check = hooks.fire("UserPromptSubmit", {"prompt": task})
     if check.decision == "deny":
         console.print(f"[yellow]prompt blocked by hook: {check.reason}"
                       "[/yellow]")
         return
-    summary(run(task, context=hooks.context_messages("UserPromptSubmit",
-                                                     check)))
+    summary(run(task, context=(extra or [])
+                + hooks.context_messages("UserPromptSubmit", check)))
 
 
 def main(argv=None):
@@ -168,6 +186,8 @@ def main(argv=None):
     hooks.load_hooks()
     rules.discover()
     rules.reset_rules()
+    skills.discover()
+    skills.reset_skills()
     snapshots.new_session()
     if mode:
         config.MODE = mode          # the flag beats settings.json
@@ -181,7 +201,11 @@ def main(argv=None):
 
 def _session(argv):
     if argv:
-        _submit(" ".join(argv))
+        text = " ".join(argv)
+        if text.startswith("/"):
+            _slash_command(text)
+        else:
+            _submit(text)
         return 0
 
     while True:
