@@ -340,3 +340,38 @@ def test_each_run_starts_without_skills_in_context(review):
     assert skills.skill_tool("code-review") == BODY
     skills.begin_task("second")             # a new conversation
     assert skills.skill_tool("code-review") == BODY
+
+
+# ------------------------------------------------------------ 7B quirks
+
+@pytest.mark.parametrize("reply", [
+    # The skill named as a tool, written as text (seen live on qwen 7B).
+    {"content": '{"name": "code-review", "arguments": {}}', "tool_calls": []},
+    # The same as a structured call.
+    {"content": "", "tool_calls": [{"name": "code-review", "arguments": {}}]},
+])
+def test_skill_name_used_as_tool_name_loads_the_skill(review, monkeypatch, reply):
+    from va_agent.core import llm
+    monkeypatch.setattr(config, "AUTO_APPROVE", True)
+    seen = []
+    script = iter([reply, {"content": "Done.", "tool_calls": []}])
+
+    def chat(messages, tools=None):
+        seen.append([dict(m) for m in messages])
+        return next(script)
+
+    monkeypatch.setattr(llm, "chat", chat)
+    from va_agent.core.agent import run
+    stats = run("review my changes", verbose=False)
+
+    assert stats["tool_failures"] == 0
+    assert "code-review" in config.SKILLS_LOADED
+    assert any(m["content"] == f"[skill: code-review]\n\n{BODY}"
+               for m in seen[-1])
+
+
+def test_plain_text_reply_is_left_alone(review):
+    from va_agent.core.agent import _skill_aliases
+    from va_agent.tools import registry
+    reply = {"content": "The answer is 4.", "tool_calls": []}
+    assert _skill_aliases(reply, registry.build_registry()) == reply

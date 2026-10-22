@@ -69,6 +69,26 @@ def _touched_path(name, arguments):
     return path if isinstance(path, str) and path else None
 
 
+def _skill_aliases(reply, tools):
+    """Small models often call a skill as if its name were a tool, e.g.
+    {"name": "code-review", "arguments": {}}, as text or as a real call.
+    Turn those into Skill(name) so the right skill still loads."""
+    if "Skill" not in tools:
+        return reply
+    calls = reply["tool_calls"]
+    if not calls and reply["content"]:
+        # Text calls naming a skill: llm's own parser, with skill names.
+        calls = llm._fallback_calls(reply["content"], set(config.SKILLS))
+        if not calls:
+            return reply
+        reply = {**reply, "content": ""}
+    return {**reply, "tool_calls": [
+        {"name": "Skill", "arguments": {"name": call["name"]}}
+        if call["name"] in config.SKILLS and call["name"] not in tools
+        else call
+        for call in calls]}
+
+
 def _skills_text():
     block = skills.prompt_block()
     return f"\n\n{block}" if block else ""
@@ -108,7 +128,7 @@ def run(task, verbose=True, context=None):
                                    len(str(messages)) // 4)
 
         try:
-            reply = llm.chat(messages, tools=schemas)
+            reply = _skill_aliases(llm.chat(messages, tools=schemas), tools)
         except Exception as error:
             if verbose:
                 console.print(f"[red]  LLM error: {error}[/red]")
