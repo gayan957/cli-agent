@@ -1,5 +1,6 @@
 """Command line entry point."""
 
+import os
 import sys
 
 from va_agent.core import config
@@ -13,7 +14,8 @@ HELP = """Commands:
   /rewind          list file snapshots and restore to before a step
   /rewind <step>   restore files to how they were before that step
   /rules           show global, injected and held project rules
-  /clear           forget which rules were injected this session
+  /skills          list skills, which are loaded, and invocations
+  /clear           forget injected rules and loaded skills
   /hooks           list configured hooks by event
   /<skill> [task]  load a skill (or .claude/commands file) and run the task
   /help            show this list
@@ -57,7 +59,10 @@ def _slash_command(text):
         _show_rules()
     elif parts[0] == "/clear":
         rules.reset_rules()
-        console.print("cleared: path-scoped rules can inject again")
+        skills.reset_skills()
+        console.print("cleared: rules can inject again, skills unloaded")
+    elif parts[0] == "/skills":
+        _show_skills()
     elif parts[0] == "/hooks":
         _show_hooks()
     elif parts[0] == "/rewind":
@@ -101,6 +106,50 @@ def _show_rules():
         if number:
             console.print("")
         console.print(title, markup=False)
+        for name, note in items:
+            console.print(f"  {name.ljust(width)}{note}".rstrip(),
+                          markup=False, highlight=False)
+
+
+def _show_skills() -> None:
+    """Available, loaded and broken skills plus the invocation log.
+    Empty sections are left out; a broken skill always shows."""
+    if not config.SKILLS_ENABLED:
+        console.print("[yellow]skills are off (VA_SKILLS=0)[/yellow]")
+        return
+    skills.maybe_reload()
+
+    def short(text, width=60):
+        return text if len(text) <= width else text[:width - 3] + "..."
+
+    def where(path):
+        root = os.path.realpath(config.SANDBOX)
+        real = os.path.realpath(path)
+        return (os.path.relpath(real, root)
+                if real.startswith(root + os.sep) else path)
+
+    available = list(config.SKILLS.values())
+    sections = [
+        (f"Available ({len(available)}):",
+         [(s.name, f"{s.origin:<9}{short(s.description)}")
+          for s in available]),
+        ("Loaded this session:",
+         [(name, "") for name in sorted(config.SKILLS_LOADED)]),
+        ("Broken (not loaded):",
+         [(where(path), reason) for path, reason in config.SKILLS_BROKEN]),
+        ("Invocations:",
+         [(name, f'<- "{task}"') for name, task in config.SKILL_INVOCATIONS]),
+    ]
+    sections = [(title, items) for title, items in sections if items]
+    if not sections:
+        console.print("no skills found in .claude/skills/ or "
+                      ".claude/commands/")
+        return
+    for number, (title, items) in enumerate(sections):
+        if number:
+            console.print("")
+        console.print(title, markup=False)
+        width = max(len(name) for name, _ in items) + 3
         for name, note in items:
             console.print(f"  {name.ljust(width)}{note}".rstrip(),
                           markup=False, highlight=False)
