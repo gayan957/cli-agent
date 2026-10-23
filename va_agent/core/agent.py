@@ -96,6 +96,15 @@ def _skills_text():
     return f"\n\n{block}" if block else ""
 
 
+def system_message():
+    """The system message a new run starts with."""
+    return {"role": "system",
+            "content": system_prompt() + rules.system_text()
+                       + hooks.system_text() + _skills_text()
+                       # Last, so compaction can swap in a fresh copy.
+                       + ctx.memory_text()}
+
+
 def _new_stats(task):
     return {"task": task, "steps": 0, "tool_calls": 0,
             "tool_failures": 0, "seconds": 0.0, "finished": False,
@@ -117,11 +126,7 @@ def run(task, verbose=True, context=None):
     tools = registry.build_registry()
     schemas = registry.build_schemas()
 
-    messages = [{"role": "system",
-                 "content": system_prompt() + rules.system_text()
-                            + hooks.system_text() + _skills_text()
-                            # Last, so compaction can swap in a fresh copy.
-                            + ctx.memory_text()},
+    messages = [system_message(),
                 {"role": "user", "content": task}, *(context or [])]
     stats = _new_stats(task)
     started = time.time()
@@ -282,5 +287,6 @@ def run(task, verbose=True, context=None):
                 f"[yellow]Stopped: hit the {config.MAX_STEPS} step limit."
                 f"[/yellow]")
 
+    ctx.remember(messages)          # for /context and /compact
     stats["seconds"] = round(time.time() - started, 1)
     return stats

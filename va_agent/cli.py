@@ -1,10 +1,13 @@
 """Command line entry point."""
 
 import os
+import shlex
+import subprocess
 import sys
 
 from va_agent.core import config
 from va_agent.core import context
+from va_agent.core import agent
 from va_agent.core.agent import run
 from va_agent.harness import hooks, permissions, rules, skills, snapshots
 from va_agent.ui.console import banner, console, summary
@@ -16,7 +19,10 @@ HELP = """Commands:
   /rewind <step>   restore files to how they were before that step
   /rules           show global, injected and held project rules
   /skills          list skills, which are loaded, and invocations
-  /clear           forget injected rules and loaded skills
+  /context         show how full the context window is, by category
+  /compact [focus] summarise the last task's conversation now
+  /clear           fresh start: reset rules, skills, hooks, approvals, context
+  /memory          open CLAUDE.md in $EDITOR (or print its path)
   /hooks           list configured hooks by event
   /<skill> [task]  load a skill (or .claude/commands file) and run the task
   /init            write a starter CLAUDE.md (never overwrites)
@@ -60,9 +66,20 @@ def _slash_command(text):
     elif parts[0] == "/rules":
         _show_rules()
     elif parts[0] == "/clear":
+        permissions.reset_session()
         rules.reset_rules()
+        hooks.reset_hooks()
         skills.reset_skills()
-        console.print("cleared: rules can inject again, skills unloaded")
+        context.reset_context()
+        context.forget()
+        console.print("cleared: conversation, approvals, injected rules, "
+                      "loaded skills and context counters reset")
+    elif parts[0] == "/context":
+        _show_context()
+    elif parts[0] == "/compact":
+        _compact(text.partition(" ")[2].strip() or None)
+    elif parts[0] == "/memory":
+        _memory()
     elif parts[0] == "/skills":
         _show_skills()
     elif parts[0] == "/init":
@@ -158,6 +175,70 @@ def _show_skills() -> None:
         for name, note in items:
             console.print(f"  {name.ljust(width)}{note}".rstrip(),
                           markup=False, highlight=False)
+
+
+def _show_context() -> None:
+    """Tokens in the window by category, against NUM_CTX."""
+    messages = context.last_messages or [agent.system_message()]
+    counts = context.breakdown(messages)
+    total = context.estimate(messages)
+    share = round(100 * total / config.NUM_CTX)
+    console.print(f"Context: {total:,} / {config.NUM_CTX:,} tokens ({share}%)\n",
+                  markup=False)
+    rows = [("system prompt", counts["system"]),
+            ("CLAUDE.md", counts["claude_md"]),
+            ("skills index", counts["skills_index"]),
+            (f"rules ({counts['rule_messages']} injected)", counts["rules"]),
+            ("conversation", counts["conversation"])]
+    for label, tokens in rows:
+        console.print(f"  {label:<19}{tokens:>6,}", markup=False,
+                      highlight=False)
+    console.print("\n  (" + ("last task's conversation"
+                             if context.last_messages
+                             else "a new task's opening prompt") + ")",
+                  markup=False)
+
+
+def _compact(focus=None) -> None:
+    """Compact the last task's conversation now and report the change."""
+    if not context.last_messages:
+        console.print("nothing to compact yet: run a task first")
+        return
+    before = context.estimate(context.last_messages)
+    messages, did = context.compact(context.last_messages, focus=focus,
+                                    trigger="manual")
+    if not did:
+        console.print(f"not compacted ({before:,} tokens): nothing to "
+                      "summarise, or a PreCompact hook blocked it")
+        return
+    context.remember(messages)
+    console.print(f"compacted: {before:,} -> {context.estimate(messages):,} "
+                  "tokens", markup=False)
+
+
+def _memory() -> None:
+    """Open the project CLAUDE.md in $EDITOR, or print where it is."""
+    root = config.SANDBOX
+    path = os.path.join(root, "CLAUDE.md")
+    if not os.path.exists(path) and os.path.exists(
+            os.path.join(root, ".claude", "CLAUDE.md")):
+        path = os.path.join(root, ".claude", "CLAUDE.md")
+    editor = os.environ.get("EDITOR")
+    if not os.path.exists(path):
+        console.print(f"no CLAUDE.md yet at {path}; run /init to create one",
+                      markup=False)
+        return
+    if not editor:
+        console.print(f"CLAUDE.md: {path}  (set $EDITOR to open it here)",
+                      markup=False)
+        return
+    try:
+        subprocess.run([*shlex.split(editor), path])
+    except OSError as error:
+        console.print(f"[yellow]could not run {editor}: {error}[/yellow]")
+        return
+    context.load_memory()
+    console.print("CLAUDE.md reloaded")
 
 
 def _show_hooks() -> None:

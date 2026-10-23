@@ -423,3 +423,18 @@ def restore(step: int) -> str:
     if not done:
         return f"nothing to restore at step {step}"
     return "\n".join(done + [f"restored {len(done)} file change(s)"])
+
+
+# ---------------------------------------------------------------- session
+
+# The most recent run's conversation, for /context and /compact. Each task
+# starts a fresh conversation, so this is what those commands look at.
+last_messages = []
+
+
+def remember(messages: list) -> None:
+    last_messages[:] = list(messages)
+
+
+def forget() -> None:
+    last_messages.clear()
