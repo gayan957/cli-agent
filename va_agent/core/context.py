@@ -252,9 +252,13 @@ def compact(messages: list, focus: str | None = None,
     if not messages:
         return messages, False
     start = max(1, len(messages) - config.KEEP_RECENT)
-    # Never start the kept window on a tool result whose call was
-    # summarised away; keep the call with it.
-    while start > 1 and messages[start].get("role") == "tool":
+    # Prefer not to start the kept window on a tool result whose call was
+    # summarised away: step back to the call, but by at most KEEP_RECENT
+    # more messages. A reply that made a dozen calls would otherwise drag
+    # every one of its results into the kept window (seen live: 13 Reads
+    # in one reply made compaction keep ~85% of the conversation).
+    floor = max(1, start - config.KEEP_RECENT)
+    while start > floor and messages[start].get("role") == "tool":
         start -= 1
     middle = [m for m in messages[1:start]
               if not str(m.get("content") or "").startswith(MEMORY_MARK)]

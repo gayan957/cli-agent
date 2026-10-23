@@ -198,6 +198,24 @@ def test_kept_window_never_starts_with_an_orphaned_tool_result(summariser, monke
     assert kept[0]["role"] == "assistant"
 
 
+def test_one_reply_with_many_calls_still_compacts(summariser):
+    """Seen live: the model asked for 13 Reads in one reply. Keeping every
+    result of that reply made compaction nearly useless."""
+    summariser()
+    calls = [{"function": {"name": "Read", "arguments": {"file_path": f"f{n}.py"}}}
+             for n in range(13)]
+    messages = [{"role": "system", "content": "SYSTEM"},
+                {"role": "user", "content": "read them all"},
+                {"role": "assistant", "content": "", "tool_calls": calls},
+                *[{"role": "tool", "content": "x" * 8000} for _ in range(13)]]
+    new, did = context.compact(messages)
+    assert did is True
+    # Stepping back toward the call stops after KEEP_RECENT more messages.
+    assert len(new) <= 2 + 2 * config.KEEP_RECENT
+    assert not context.needs_compaction(new)
+    assert config.COMPACT_ATTEMPTS == 0             # counted as effective
+
+
 def test_claude_md_reread_from_disk_after_compaction(summariser, project):
     summariser()
     (project / "CLAUDE.md").write_text("Old memory.")
