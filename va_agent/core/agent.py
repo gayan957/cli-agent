@@ -3,6 +3,8 @@
 import time
 
 from va_agent.core import config
+# Imported as ctx: run() has a parameter named context (Phase 6).
+from va_agent.core import context as ctx
 from va_agent.core import llm
 from va_agent.harness import hooks, rules, skills, snapshots
 from va_agent.harness.permissions import approve, checkpoint
@@ -123,6 +125,8 @@ def run(task, verbose=True, context=None):
     for step in range(config.MAX_STEPS):
         stats["steps"] = step + 1
         snapshots.next_step()
+        # Layer 2: no single message may take over the window.
+        messages = [ctx.clamp(message) for message in messages]
         # Rough size of what the model sees: ~4 characters per token.
         stats["peak_tokens"] = max(stats["peak_tokens"],
                                    len(str(messages)) // 4)
@@ -222,7 +226,8 @@ def run(task, verbose=True, context=None):
                 if is_edit:
                     stats["edit_failures"] += 1
                 result = f"ERROR: {type(error).__name__}: {error}"
-                messages.append({"role": "tool", "content": str(result)})
+                messages.append({"role": "tool",
+                                 "content": ctx.cap(result)})
                 messages.extend(hooks.context_messages("PreToolUse", pre))
                 continue
 
@@ -231,7 +236,8 @@ def run(task, verbose=True, context=None):
             loaded = skills.take_pending() if name == "Skill" else None
             if loaded:
                 result = f"Loaded skill {loaded[0]!r}; its instructions follow."
-            messages.append({"role": "tool", "content": str(result)})
+            # Layer 1 of context management: cap every tool result.
+            messages.append({"role": "tool", "content": ctx.cap(result)})
             if loaded:
                 messages.append(skills.message(*loaded))
             messages.extend(hooks.context_messages("PreToolUse", pre))

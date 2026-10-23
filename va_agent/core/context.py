@@ -87,3 +87,54 @@ def breakdown(messages: list) -> dict:
     tokens = {category: count // 4 for category, count in chars.items()}
     tokens["rule_messages"] = rule_messages
     return tokens
+
+
+# ---------------------------------------------------------------- limits
+
+def cap(text: str) -> str:
+    """Layer 1: cut a tool result to TOOL_RESULT_CAP characters. The marker
+    tells the model the output was partial, so it can page with
+    Read(offset, limit) if it needs more."""
+    text = str(text)
+    limit = config.TOOL_RESULT_CAP
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n...[truncated, {len(text) - limit} chars omitted]"
+
+
+def message_limit() -> int:
+    """Most characters any one message may hold."""
+    return int(config.MAX_MESSAGE_SHARE * config.NUM_CTX * 4)
+
+
+def _clamp_text(text: str, limit: int) -> str:
+    return text if len(text) <= limit else f"{text[:limit]}\n...[message truncated]"
+
+
+def clamp(message: dict) -> dict:
+    """Layer 2: no message larger than MAX_MESSAGE_SHARE of the window,
+    including long tool-call arguments. Without this an oversized message
+    in compaction's kept window survives every compaction, and the agent
+    compacts forever. Returns a new dict; the input is not changed."""
+    limit = message_limit()
+    content = message.get("content")
+    clamped = dict(message)
+    if isinstance(content, str) and len(content) > limit:
+        clamped["content"] = _clamp_text(content, limit)
+    calls = message.get("tool_calls")
+    if calls:
+        new_calls = []
+        for call in calls:
+            function = call.get("function") if isinstance(call, dict) else None
+            arguments = function.get("arguments") if function else None
+            if isinstance(arguments, dict) and any(
+                    isinstance(v, str) and len(v) > limit
+                    for v in arguments.values()):
+                arguments = {key: _clamp_text(value, limit)
+                             if isinstance(value, str) else value
+                             for key, value in arguments.items()}
+                call = {**call, "function": {**function,
+                                             "arguments": arguments}}
+            new_calls.append(call)
+        clamped["tool_calls"] = new_calls
+    return clamped
