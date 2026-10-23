@@ -12,6 +12,7 @@ model incompetence. Three layers keep the conversation inside the window:
 """
 
 import os
+import subprocess
 
 from va_agent.core import config
 from va_agent.core import llm
@@ -307,3 +308,93 @@ def reset_context() -> None:
     reset_session/rules/hooks/skills: sibling modules own those.)"""
     config.PEAK_TOKENS = 0
     config.COMPACT_ATTEMPTS = 0
+
+
+# ---------------------------------------------------------------- /init
+
+_LANGUAGES = {".py": "Python", ".js": "JavaScript", ".ts": "TypeScript",
+              ".go": "Go", ".rs": "Rust", ".java": "Java", ".rb": "Ruby",
+              ".c": "C", ".cpp": "C++", ".cs": "C#", ".php": "PHP"}
+_SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".va",
+         ".pytest_cache", "dist", "build"}
+
+
+def _language(root: str) -> str:
+    counts, seen = {}, 0
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in _SKIP
+                   and not d.endswith(".egg-info")]
+        for name in files:
+            language = _LANGUAGES.get(os.path.splitext(name)[1])
+            if language:
+                counts[language] = counts.get(language, 0) + 1
+            seen += 1
+        if seen > 5000:
+            break
+    return max(counts, key=counts.get) if counts else "unknown"
+
+
+def _test_command(root: str) -> str:
+    if os.path.isfile(os.path.join(root, "pytest.ini")):
+        return "pytest -q"
+    pyproject = _read(os.path.join(root, "pyproject.toml"))
+    if "pytest" in pyproject:
+        return "pytest -q"
+    if '"test"' in _read(os.path.join(root, "package.json")):
+        return "npm test"
+    return "unknown: add the test command here"
+
+
+def _branch(root: str) -> str:
+    try:
+        done = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                              cwd=root, capture_output=True, text=True,
+                              timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    return done.stdout.strip() if done.returncode == 0 else "unknown"
+
+
+def _layout(root: str) -> list:
+    entries = []
+    for name in sorted(os.listdir(root)):
+        if name.startswith(".") or name in _SKIP or name.endswith(".egg-info"):
+            continue
+        entries.append(f"{name}/" if os.path.isdir(os.path.join(root, name))
+                       else name)
+    return entries
+
+
+def init_memory(project_dir: str | None = None) -> str:
+    """Write a starter <project>/CLAUDE.md from what the repo looks like.
+    Never overwrites an existing file. Returns a message saying what
+    happened."""
+    root = project_dir or config.SANDBOX
+    path = os.path.join(root, "CLAUDE.md")
+    if os.path.exists(path):
+        return f"{path} already exists; not overwriting it."
+    layout = "\n".join(f"- `{entry}`" for entry in _layout(root)) \
+        or "- (empty)"
+    text = f"""# CLAUDE.md
+
+Project memory for coding agents. Keep it short: it is sent on every turn.
+
+## Overview
+- Language: {_language(root)}
+- Git branch when this file was generated: {_branch(root)}
+
+## Commands
+- Run tests: `{_test_command(root)}`
+
+## Layout
+{layout}
+
+## Conventions
+- (add this project's conventions here)
+"""
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    except OSError as error:
+        return f"could not write {path}: {error}"
+    return f"Created {path}"

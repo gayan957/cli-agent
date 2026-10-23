@@ -4,6 +4,7 @@ import os
 import sys
 
 from va_agent.core import config
+from va_agent.core import context
 from va_agent.core.agent import run
 from va_agent.harness import hooks, permissions, rules, skills, snapshots
 from va_agent.ui.console import banner, console, summary
@@ -18,6 +19,7 @@ HELP = """Commands:
   /clear           forget injected rules and loaded skills
   /hooks           list configured hooks by event
   /<skill> [task]  load a skill (or .claude/commands file) and run the task
+  /init            write a starter CLAUDE.md (never overwrites)
   /help            show this list
   exit, quit       leave va-agent
 Anything else is sent to the agent as a task."""
@@ -63,6 +65,9 @@ def _slash_command(text):
         console.print("cleared: rules can inject again, skills unloaded")
     elif parts[0] == "/skills":
         _show_skills()
+    elif parts[0] == "/init":
+        console.print(context.init_memory(), markup=False)
+        context.load_memory()
     elif parts[0] == "/hooks":
         _show_hooks()
     elif parts[0] == "/rewind":
@@ -237,6 +242,8 @@ def main(argv=None):
     rules.reset_rules()
     skills.discover()
     skills.reset_skills()
+    context.load_memory()
+    context.reset_context()
     snapshots.new_session()
     if mode:
         config.MODE = mode          # the flag beats settings.json

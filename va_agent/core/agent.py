@@ -119,7 +119,9 @@ def run(task, verbose=True, context=None):
 
     messages = [{"role": "system",
                  "content": system_prompt() + rules.system_text()
-                            + hooks.system_text() + _skills_text()},
+                            + hooks.system_text() + _skills_text()
+                            # Last, so compaction can swap in a fresh copy.
+                            + ctx.memory_text()},
                 {"role": "user", "content": task}, *(context or [])]
     stats = _new_stats(task)
     started = time.time()
