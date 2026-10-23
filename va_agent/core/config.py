@@ -74,6 +74,16 @@ SKILLS_BROKEN = []      # (path, reason)
 SKILLS_WARN_ABOVE = int(os.environ.get("VA_SKILLS_WARN", "15"))
 SKILL_INVOCATIONS = []  # (skill_name, task_excerpt) for logging
 
+# Context management (Phase 8). See core/context.py.
+COMPACT_THRESHOLD = float(os.environ.get("VA_COMPACT_AT", "0.75"))
+COMPACT_ENABLED = os.environ.get("VA_COMPACT", "1") != "0"
+KEEP_RECENT = int(os.environ.get("VA_KEEP_RECENT", "4"))
+TOOL_RESULT_CAP = int(os.environ.get("VA_TOOL_CAP", "8000"))     # characters
+MAX_MESSAGE_SHARE = 0.25     # no single message may exceed this share of NUM_CTX
+CLAUDE_MD = ""               # loaded project memory
+COMPACT_ATTEMPTS = 0         # consecutive ineffective compactions
+PEAK_TOKENS = 0
+
 # Which Ollama model to use.
 MODEL = os.environ.get("VA_MODEL", "qwen-coder-32k")
 
