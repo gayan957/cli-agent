@@ -161,13 +161,23 @@ def test_same_command_under_two_matchers_runs_once(project):
 
 
 def test_hooks_run_in_parallel_and_all_context_is_kept(project):
-    configure("PreToolUse",
-              script(project, "a.sh", "cat >/dev/null; sleep 1; echo a"),
-              script(project, "b.sh", "cat >/dev/null; sleep 1; echo b"),
-              script(project, "c.sh", "cat >/dev/null; sleep 1; echo c"))
-    started = time.time()
+    # Each hook marks that it started, then waits (up to 5s) until all
+    # three have started. Run one after another, the first would give up
+    # and say "alone"; run in parallel, all three see each other. This
+    # checks overlap directly instead of timing, so a busy machine cannot
+    # make it flaky.
+    def waiting(name):
+        return script(project, f"{name}.sh", f"""cat >/dev/null
+touch "{project}/started_{name}"
+for i in $(seq 50); do
+  if [ -e "{project}/started_a" ] && [ -e "{project}/started_b" ] \\
+     && [ -e "{project}/started_c" ]; then echo {name}; exit 0; fi
+  sleep 0.1
+done
+echo {name}-alone""")
+
+    configure("PreToolUse", waiting("a"), waiting("b"), waiting("c"))
     result = hooks.fire("PreToolUse", BASH)
-    assert time.time() - started < 2.5
     assert result.context == ["a", "b", "c"]
 
 
