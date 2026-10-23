@@ -11,7 +11,12 @@ model incompetence. Three layers keep the conversation inside the window:
    ineffective compaction can never loop.
 """
 
+import os
+
 from va_agent.core import config
+from va_agent.core import llm
+from va_agent.harness import hooks, rules, skills
+from va_agent.ui.console import console
 
 # Prefixes that mark injected content, for breakdown().
 RULE_MARK = "[project rule:"
@@ -138,3 +143,167 @@ def clamp(message: dict) -> dict:
             new_calls.append(call)
         clamped["tool_calls"] = new_calls
     return clamped
+
+
+# ---------------------------------------------------------------- memory
+
+_memory_dir = None      # set by load_memory(); None means never loaded
+
+# User-level memory. A module attribute so tests can point it elsewhere.
+USER_MEMORY = os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md")
+
+
+def _read(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def load_memory(project_dir: str | None = None) -> str:
+    """~/.claude/CLAUDE.md, then <project>/CLAUDE.md (else
+    <project>/.claude/CLAUDE.md), joined. Missing files are fine."""
+    global _memory_dir
+    _memory_dir = project_dir or config.SANDBOX
+    project = _read(os.path.join(_memory_dir, "CLAUDE.md")) \
+        or _read(os.path.join(_memory_dir, ".claude", "CLAUDE.md"))
+    config.CLAUDE_MD = "\n\n".join(part for part in (_read(USER_MEMORY), project)
+                                   if part)
+    return config.CLAUDE_MD
+
+
+def _reload_memory() -> str:
+    """Fresh CLAUDE.md for compaction. Only re-read if this session loaded
+    memory at all, so benchmark runs never pick up ~/.claude/CLAUDE.md."""
+    if _memory_dir is None:
+        return config.CLAUDE_MD
+    return load_memory(_memory_dir)
+
+
+def memory_text() -> str:
+    """CLAUDE.md formatted for the end of the system prompt."""
+    return f"\n\n{MEMORY_MARK}\n\n{config.CLAUDE_MD}" if config.CLAUDE_MD else ""
+
+
+# ---------------------------------------------------------------- compaction
+
+MAX_ATTEMPTS = 2        # consecutive ineffective compactions before giving up
+MIN_REDUCTION = 0.10    # a compaction must cut at least this share
+
+SUMMARY_SYSTEM = ("You summarise the earlier part of a coding agent's "
+                  "session so it can continue without the full history.")
+
+SUMMARY_PROMPT = """Summarise the conversation below for the agent that will
+continue the work. Preserve, as short bullet points:
+- the original task, in full
+- files read or modified, and what changed in each
+- decisions made and why
+- errors encountered and whether they were fixed
+- what remains to be done
+Do not invent anything that is not in the conversation."""
+
+
+def needs_compaction(messages: list) -> bool:
+    """True once the estimate passes COMPACT_THRESHOLD of the window."""
+    return estimate(messages) > config.NUM_CTX * config.COMPACT_THRESHOLD
+
+
+def _transcript(messages: list) -> str:
+    """The messages to summarise as plain text, cut in the middle if it
+    would not fit in half the window."""
+    lines = []
+    for message in messages:
+        text = str(message.get("content") or "")
+        for call in message.get("tool_calls") or []:
+            function = call.get("function", call)
+            arguments = str(function.get("arguments", ""))[:300]
+            text += f"\n(called {function.get('name')} {arguments})"
+        lines.append(f"{message.get('role', '?')}: {text}")
+    text = "\n\n".join(lines)
+    room = int(config.NUM_CTX * 4 * 0.5)
+    if len(text) > room:
+        text = (text[:room // 2] + "\n\n...[middle of transcript omitted]...\n\n"
+                + text[-room // 2:])
+    return text
+
+
+def _without_memory(system: dict) -> dict:
+    """The system message minus its CLAUDE.md section (re-added fresh)."""
+    content = str(system.get("content") or "")
+    cut = content.find(f"\n\n{MEMORY_MARK}")
+    return system if cut == -1 else {**system, "content": content[:cut]}
+
+
+def _ineffective(reason: str) -> None:
+    config.COMPACT_ATTEMPTS += 1
+    if config.COMPACT_ATTEMPTS >= MAX_ATTEMPTS:
+        console.print(f"[yellow]  context: compaction is not helping "
+                      f"({reason}); continuing without it[/yellow]")
+
+
+def compact(messages: list, focus: str | None = None,
+            trigger: str = "manual") -> tuple:
+    """Summarise everything between the system prompt and the last
+    KEEP_RECENT messages with exactly one model call. Returns
+    (messages, True) when compacted, else (unchanged messages, False)."""
+    if not messages:
+        return messages, False
+    start = max(1, len(messages) - config.KEEP_RECENT)
+    # Never start the kept window on a tool result whose call was
+    # summarised away; keep the call with it.
+    while start > 1 and messages[start].get("role") == "tool":
+        start -= 1
+    middle = [m for m in messages[1:start]
+              if not str(m.get("content") or "").startswith(MEMORY_MARK)]
+    if not middle:
+        return messages, False
+
+    pre = hooks.fire("PreCompact", {"trigger": trigger,
+                                    "custom_instructions": focus or ""})
+    if pre.decision == "deny":
+        return messages, False
+
+    before = estimate(messages)
+    prompt = SUMMARY_PROMPT
+    if focus:
+        prompt += f"\nGive priority to anything about: {focus}"
+    prompt += f"\n\nConversation:\n\n{_transcript(middle)}"
+    try:
+        reply = llm.chat([{"role": "system", "content": SUMMARY_SYSTEM},
+                          {"role": "user", "content": prompt}])
+        summary = str(reply.get("content") or "").strip()
+    except Exception as error:
+        _ineffective(f"summary failed: {error}")
+        return messages, False
+    if not summary:
+        _ineffective("empty summary")
+        return messages, False
+
+    memory = _reload_memory()
+    rebuilt = [_without_memory(messages[0])]
+    if memory:
+        rebuilt.append({"role": "user", "content": f"{MEMORY_MARK}\n\n{memory}"})
+    rebuilt.append({"role": "user",
+                    "content": f"[summary of earlier work]\n\n{summary}"})
+    rebuilt += hooks.context_messages("PreCompact", pre)
+    rebuilt += messages[start:]
+
+    # Rules can re-fire when their file is touched again; skills whose body
+    # was summarised away can be loaded again.
+    rules.reset_rules()
+    skills.sync_context(rebuilt)
+
+    after = estimate(rebuilt)
+    if after > before * (1 - MIN_REDUCTION):
+        _ineffective(f"{before} -> {after} tokens")
+    else:
+        config.COMPACT_ATTEMPTS = 0
+    return rebuilt, True
+
+
+def reset_context() -> None:
+    """Per-run maximum and attempt counter back to zero. (Not
+    reset_session/rules/hooks/skills: sibling modules own those.)"""
+    config.PEAK_TOKENS = 0
+    config.COMPACT_ATTEMPTS = 0

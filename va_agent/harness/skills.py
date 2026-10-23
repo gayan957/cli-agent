@@ -325,3 +325,13 @@ def reset_skills() -> None:
     config.SKILL_INVOCATIONS.clear()
     _in_context.clear()
     _pending = None
+
+
+def sync_context(messages) -> None:
+    """After compaction: a skill counts as in context only if its body is
+    still in *messages*, so a summarised-away skill can be loaded again."""
+    _in_context.clear()
+    for item in messages:
+        content = str(item.get("content", ""))
+        if content.startswith(_PREFIX) and "]" in content:
+            _in_context.add(content[len(_PREFIX):content.index("]")])

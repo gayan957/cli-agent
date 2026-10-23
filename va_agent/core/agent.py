@@ -100,7 +100,8 @@ def _new_stats(task):
     return {"task": task, "steps": 0, "tool_calls": 0,
             "tool_failures": 0, "seconds": 0.0, "finished": False,
             # Phase 4 experiment outputs.
-            "edit_attempts": 0, "edit_failures": 0, "peak_tokens": 0}
+            "edit_attempts": 0, "edit_failures": 0, "peak_tokens": 0,
+            "compactions": 0}
 
 
 def run(task, verbose=True, context=None):
@@ -108,6 +109,7 @@ def run(task, verbose=True, context=None):
     messages to follow the task, e.g. UserPromptSubmit hook output."""
     checkpoint(task)
     hooks.reset_hooks()
+    ctx.reset_context()             # per-run token peak and attempt counter
     skills.maybe_reload()           # an edited SKILL.md needs no restart
     skills.begin_task(task, context)
 
@@ -127,9 +129,20 @@ def run(task, verbose=True, context=None):
         snapshots.next_step()
         # Layer 2: no single message may take over the window.
         messages = [ctx.clamp(message) for message in messages]
-        # Rough size of what the model sees: ~4 characters per token.
-        stats["peak_tokens"] = max(stats["peak_tokens"],
-                                   len(str(messages)) // 4)
+        # Layer 3: summarise old history near the limit. The attempt
+        # counter stops an ineffective compaction from looping.
+        if (config.COMPACT_ENABLED
+                and config.COMPACT_ATTEMPTS < ctx.MAX_ATTEMPTS
+                and ctx.needs_compaction(messages)):
+            before = ctx.estimate(messages)
+            messages, did = ctx.compact(messages, trigger="auto")
+            if did:
+                stats["compactions"] += 1
+                if verbose:
+                    console.print(f"[dim]  compacted context: {before:,} -> "
+                                  f"{ctx.estimate(messages):,} tokens[/dim]")
+        config.PEAK_TOKENS = max(config.PEAK_TOKENS, ctx.estimate(messages))
+        stats["peak_tokens"] = config.PEAK_TOKENS
 
         try:
             reply = _skill_aliases(llm.chat(messages, tools=schemas), tools)
