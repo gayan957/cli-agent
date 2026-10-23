@@ -183,14 +183,16 @@ def _show_hooks() -> None:
 
 
 def _rewind(step=None):
-    """List snapshots, then restore files to before the chosen step."""
-    found = snapshots.list_snapshots()
+    """List snapshots, then restore files to before the chosen step,
+    after confirming."""
+    found = context.list_snapshots()
     if not found:
         console.print("no snapshots yet")
         return
     if step is None:
-        for number, paths in found:
-            console.print(f"  step {number}: {', '.join(paths)}")
+        for number, stamp, files in found:
+            console.print(f"  step {number}  {stamp}  {', '.join(files)}",
+                          markup=False)
         try:
             step = input("  Rewind to before which step? (Enter cancels) ")
         except (EOFError, KeyboardInterrupt):
@@ -202,10 +204,16 @@ def _rewind(step=None):
     if not step.isdigit():
         console.print("[yellow]step must be a number[/yellow]")
         return
-    done = snapshots.rewind(int(step))
-    for line in done:
-        console.print(f"  {line}")
-    console.print(f"[green]rewound {len(done)} file change(s)[/green]")
+    try:
+        answer = input(f"  Restore files to how they were before step {step}? "
+                       "This overwrites their current content. [y/N] ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if answer.strip().lower() not in {"y", "yes"}:
+        console.print("cancelled")
+        return
+    console.print(context.restore(int(step)), markup=False)
 
 
 def _skill_command(text):

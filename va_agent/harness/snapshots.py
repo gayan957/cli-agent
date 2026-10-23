@@ -140,3 +140,9 @@ def rewind(step, session=None):
                 done.append(f"removed {entry['path']}")
         shutil.rmtree(step_dir, ignore_errors=True)
     return done
+
+
+def step_dir(step, session=None):
+    """The folder holding one step's snapshot."""
+    return os.path.join(_session_dir(session or latest_session() or ""),
+                        f"{step:04d}")

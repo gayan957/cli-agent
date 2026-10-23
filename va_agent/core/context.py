@@ -13,10 +13,11 @@ model incompetence. Three layers keep the conversation inside the window:
 
 import os
 import subprocess
+import time
 
 from va_agent.core import config
 from va_agent.core import llm
-from va_agent.harness import hooks, rules, skills
+from va_agent.harness import hooks, rules, skills, snapshots
 from va_agent.ui.console import console
 
 # Prefixes that mark injected content, for breakdown().
@@ -398,3 +399,27 @@ Project memory for coding agents. Keep it short: it is sent on every turn.
     except OSError as error:
         return f"could not write {path}: {error}"
     return f"Created {path}"
+
+
+# ---------------------------------------------------------------- snapshots
+
+def list_snapshots() -> list:
+    """(step, time, [files]) for this session's snapshots, oldest first."""
+    found = []
+    for step, files in snapshots.list_snapshots():
+        try:
+            stamp = time.strftime("%H:%M:%S", time.localtime(
+                os.path.getmtime(snapshots.step_dir(step))))
+        except OSError:
+            stamp = "?"
+        found.append((step, stamp, files))
+    return found
+
+
+def restore(step: int) -> str:
+    """Put files back as they were before *step* (undoing that step and
+    every later one). Returns what happened."""
+    done = snapshots.rewind(int(step))
+    if not done:
+        return f"nothing to restore at step {step}"
+    return "\n".join(done + [f"restored {len(done)} file change(s)"])
