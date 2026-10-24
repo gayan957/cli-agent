@@ -15,8 +15,9 @@ from dataclasses import dataclass
 from va_agent.core import config
 from va_agent.core import context
 from va_agent.core import session
-from va_agent.harness import hooks, permissions, rules, skills
-from va_agent.ui.console import console
+from va_agent.harness import hooks, permissions, rules, skills, worktrees
+from va_agent.tools import shell, todo
+from va_agent.ui.console import banner, console
 
 
 @dataclass
@@ -426,6 +427,91 @@ def _model(args):
         _say(f"  current model {config.MODEL} is not in this list")
 
 
+# ---------------------------------------------------------------- worktrees
+
+def scope_to(path: str) -> None:
+    """Start a fresh session scoped to *path* (a worktree): its own
+    settings, rules, hooks, skills, CLAUDE.md and sessions."""
+    config.SANDBOX = os.path.realpath(path)
+    session.reset_session_state()
+    permissions.reset_session()
+    # load_settings only replaces what a settings file names: start clean.
+    config.ALLOW_RULES, config.DENY_RULES, config.WORKING_DIRS = [], [], []
+    permissions.load_settings()
+    rules.discover()
+    rules.reset_rules()
+    hooks.load_hooks()
+    skills.discover()
+    skills.reset_skills()
+    context.load_memory()
+    context.reset_context()
+    context.forget()
+    todo.reset()
+    shell.reset()
+    banner(config.SANDBOX, config.MODEL, config.MODE,
+           worktrees.banner_branch())
+
+
+def _confirm(question: str) -> bool:
+    try:
+        return input(f"  {question} [y/N] ").strip().lower() in {"y", "yes"}
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+
+def _worktree(args):
+    parts = args.split()
+    sub, rest = (parts[0], parts[1:]) if parts else ("", [])
+    flags = {word for word in rest if word.startswith("--")}
+    names = [word for word in rest if not word.startswith("--")]
+    branch = names[0] if names else ""
+
+    if sub == "list":
+        here = worktrees.current()
+        trees = worktrees.list_worktrees()
+        if not trees:
+            _say("not inside a git repository")
+        for path, name, head, is_main in trees:
+            tags = [t for t, on in (("main", is_main),
+                                    ("current", here and here[0] == path)) if on]
+            label = f"  ({', '.join(tags)})" if tags else ""
+            _say(f"  {name:<24}{head[:8]}  {path}{label}")
+    elif sub == "create" and branch:
+        message = worktrees.create(branch, attach="--attach" in flags)
+        _say(message)
+        if worktrees.BRANCH_EXISTS in message and _confirm(
+                f"Attach the existing branch {branch} instead?"):
+            message = worktrees.create(branch, attach=True)
+            _say(message)
+        if message.rstrip().splitlines()[-1].startswith("Created worktree"):
+            scope_to(worktrees.path_for(branch))
+    elif sub == "switch" and branch:
+        if branch == "main":
+            root = worktrees.main_root()
+            if root:
+                scope_to(root)
+            else:
+                _say("not inside a git repository")
+            return
+        tree = next((t for t in worktrees.list_worktrees() if t[1] == branch),
+                    None)
+        if tree:
+            scope_to(tree[0])
+        else:
+            _say(f"no worktree for branch {branch}; /worktree create {branch}")
+    elif sub == "remove" and branch:
+        here, root = worktrees.current(), worktrees.main_root()
+        leaving = here and here[1] == branch and not here[3]
+        message = worktrees.remove(branch, force="--force" in flags)
+        _say(message)
+        if leaving and message.startswith("Removed") and root:
+            scope_to(root)          # the directory we were in is gone
+    else:
+        _say("usage: /worktree create <branch> [--attach] | list | "
+             "switch <branch|main> | remove <branch> [--force]")
+
+
 register("help", "list every command (this list)", _help)
 register("clear", "new conversation and session; every reset", _clear)
 register("resume", "switch to a saved session (pick from a list)", _resume,
@@ -446,6 +532,8 @@ register("rules", "global, injected, held and broken rules", _rules,
 register("skills", "skills, which are loaded, and invocations", _skills,
          group="Project")
 register("hooks", "configured hooks by event", _hooks, group="Project")
+register("worktree", "git worktrees: create, list, switch, remove", _worktree,
+         args="<create|list|switch|remove> [branch]", group="Project")
 register("cost", "elapsed time, model time, tokens and turns", _cost,
          group="Agent")
 register("model", "list Ollama models, or switch to one", _model,

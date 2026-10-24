@@ -170,7 +170,10 @@ def _walk(root_dir):
         yield root_dir
         return
     for root, dirs, files in os.walk(root_dir):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        # .claude/worktrees/ holds full copies of the repo (Phase 9).
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS
+                   and not (d == "worktrees"
+                            and os.path.basename(root) == ".claude")]
         for name in files:
             yield os.path.join(root, name)
 

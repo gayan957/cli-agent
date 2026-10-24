@@ -6,3 +6,4 @@ __pycache__/
 workspace/
 testbox*/
 *.egg-info/
+.claude/worktrees/

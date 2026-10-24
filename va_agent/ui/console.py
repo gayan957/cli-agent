@@ -27,10 +27,13 @@ def describe_call(name, arguments, step=None):
     return f"[dim]  {prefix}{name}({shown})[/dim]"
 
 
-def banner(sandbox, model, mode="default"):
+def banner(sandbox, model, mode="default", branch=None):
+    """One line: model, mode, working directory, and the worktree branch
+    when not in the main worktree."""
+    where = f" [dim]|[/dim] worktree: {branch}" if branch else ""
     console.print(f"[bold cyan]va-agent[/bold cyan] [dim]|[/dim] "
                   f"model: {model} [dim]|[/dim] mode: {mode} [dim]|[/dim] "
-                  f"sandbox: {sandbox}")
+                  f"cwd: {sandbox}{where}")
 
 
 def summary(stats):

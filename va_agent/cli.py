@@ -9,7 +9,7 @@ from va_agent.core import config
 from va_agent.core import context
 from va_agent.core import session
 from va_agent.core.agent import run
-from va_agent.harness import hooks, permissions, rules, skills
+from va_agent.harness import hooks, permissions, rules, skills, worktrees
 from va_agent.ui.console import banner, console, summary
 
 SESSION_ID_PATTERN = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
@@ -100,7 +100,8 @@ def main(argv=None):
         _start_resumed(resume)
     if mode:
         config.MODE = mode          # the flag beats settings.json
-    banner(config.SANDBOX, config.MODEL, config.MODE)
+    banner(config.SANDBOX, config.MODEL, config.MODE,
+           worktrees.banner_branch())
     hooks.start_session()
     try:
         return _session(argv)
