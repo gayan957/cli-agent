@@ -96,6 +96,17 @@ def _skills_text():
     return f"\n\n{block}" if block else ""
 
 
+def _earlier(history):
+    """Earlier turns to continue from: without the old system prompt and
+    CLAUDE.md copies, since a fresh system message carries current ones."""
+    if not history:
+        return []
+    return [message for message in history
+            if message.get("role") != "system"
+            and not str(message.get("content") or "").startswith(
+                ctx.MEMORY_MARK)]
+
+
 def system_message():
     """The system message a new run starts with."""
     return {"role": "system",
@@ -113,20 +124,23 @@ def _new_stats(task):
             "compactions": 0}
 
 
-def run(task, verbose=True, context=None):
+def run(task, verbose=True, context=None, history=None):
     """Run one task to completion. Returns a stats dict. *context* is extra
-    messages to follow the task, e.g. UserPromptSubmit hook output."""
+    messages to follow the task, e.g. UserPromptSubmit hook output.
+    *history* is the session's earlier conversation (interactive and resumed
+    sessions); benchmark runs pass none and start fresh."""
     checkpoint(task)
     hooks.reset_hooks()
     ctx.reset_context()             # per-run token peak and attempt counter
     skills.maybe_reload()           # an edited SKILL.md needs no restart
-    skills.begin_task(task, context)
+    earlier = _earlier(history)
+    skills.begin_task(task, earlier + list(context or []))
 
     # Built per run so VA_EDIT_MODE / VA_TODOS changes take effect.
     tools = registry.build_registry()
     schemas = registry.build_schemas()
 
-    messages = [system_message(),
+    messages = [system_message(), *earlier,
                 {"role": "user", "content": task}, *(context or [])]
     stats = _new_stats(task)
     started = time.time()

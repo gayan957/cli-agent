@@ -1,9 +1,11 @@
 """Command line entry point."""
 
 import os
+import re
 import shlex
 import subprocess
 import sys
+import time
 
 from va_agent.core import config
 from va_agent.core import context
@@ -32,9 +34,13 @@ HELP = """Commands:
 Anything else is sent to the agent as a task."""
 
 
+SESSION_ID_PATTERN = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
+
+
 def _consume_flags(argv):
-    """Handle flags that must take effect before anything runs.
-    Returns (remaining argv, mode from --mode or None)."""
+    """Handle flags that must take effect before anything runs. Returns
+    (remaining argv, mode from --mode or None, resume) where resume is
+    None, "continue", "pick" or a session id."""
     if "--print" in argv:
         argv.remove("--print")
         config.AUTO_APPROVE = True
@@ -47,7 +53,80 @@ def _consume_flags(argv):
                              + ", ".join(permissions.MODES))
         mode = argv[index + 1]
         del argv[index:index + 2]
-    return argv, mode
+
+    resume = None
+    if "--continue" in argv:
+        argv.remove("--continue")
+        resume = "continue"
+    if "--resume" in argv:
+        index = argv.index("--resume")
+        following = argv[index + 1] if index + 1 < len(argv) else ""
+        if SESSION_ID_PATTERN.match(following):
+            resume = following
+            del argv[index:index + 2]
+        else:
+            resume = "pick"
+            del argv[index]
+    return argv, mode, resume
+
+
+def _age(stamp):
+    seconds = max(0, time.time() - (stamp or 0))
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size:
+            return f"{int(seconds // size)}{unit} ago"
+    return "just now"
+
+
+def _resume_into(data):
+    """Make a saved session the current conversation."""
+    messages = session.restore(data)
+    context.remember(messages)
+    # Rules already in the saved conversation must not inject twice.
+    for message in messages:
+        content = str(message.get("content") or "")
+        if content.startswith(context.RULE_MARK) and "]" in content:
+            config.RULES_INJECTED.add(
+                content[len(context.RULE_MARK):content.index("]")].strip())
+    console.print(f"resumed {data['session_id']}: {len(messages)} messages"
+                  f" - {data.get('first_task') or '(no task yet)'}",
+                  markup=False)
+
+
+def _pick_session():
+    """Numbered list of saved sessions; returns the chosen one or None."""
+    found = session.list_sessions()
+    if not found:
+        console.print("no saved sessions here; starting fresh")
+        return None
+    for number, item in enumerate(found, 1):
+        console.print(f"  {number:>2}. {item.get('first_task') or '(no task)'}"
+                      f"  ({_age(item.get('updated'))}, "
+                      f"{item['message_count']} messages)", markup=False)
+    try:
+        choice = input("  Resume which? (Enter starts fresh) ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    if not choice.isdigit() or not 1 <= int(choice) <= len(found):
+        return None
+    return session.load(found[int(choice) - 1]["session_id"])
+
+
+def _start_resumed(resume):
+    """Apply --continue / --resume before the first turn."""
+    if resume == "continue":
+        data = session.most_recent()
+        if data is None:
+            console.print("no saved session to continue; starting fresh")
+    elif resume == "pick":
+        data = _pick_session()
+    else:
+        data = session.load(resume)
+        if data is None:
+            console.print("starting fresh")
+    if data:
+        _resume_into(data)
 
 
 def _slash_command(text):
@@ -321,13 +400,15 @@ def _submit(task, extra=None):
                       "[/yellow]")
         return
     summary(run(task, context=(extra or [])
-                + hooks.context_messages("UserPromptSubmit", check)))
+                + hooks.context_messages("UserPromptSubmit", check),
+                history=list(context.last_messages)))
     # After every turn, so an uncleanly closed terminal loses nothing.
     session.save(context.last_messages)
 
 
 def main(argv=None):
-    argv, mode = _consume_flags(list(sys.argv[1:] if argv is None else argv))
+    argv, mode, resume = _consume_flags(
+        list(sys.argv[1:] if argv is None else argv))
     permissions.load_settings()
     hooks.load_hooks()
     rules.discover()
@@ -337,6 +418,8 @@ def main(argv=None):
     context.load_memory()
     context.reset_context()
     session.reset_session_state()   # new SESSION_ID, shared with snapshots
+    if resume:
+        _start_resumed(resume)
     if mode:
         config.MODE = mode          # the flag beats settings.json
     banner(config.SANDBOX, config.MODEL, config.MODE)
