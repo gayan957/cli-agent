@@ -376,6 +376,56 @@ def _hooks(_args):
                      f"(timeout {limit:g}s)")
 
 
+# ---------------------------------------------------------------- Agent
+
+def _duration(seconds: float) -> str:
+    seconds = int(round(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60:02d}s"
+    return f"{seconds // 3600}h {seconds % 3600 // 60:02d}m"
+
+
+def _cost(_args):
+    """Local inference costs time, not money, so report time."""
+    elapsed = time.time() - config.SESSION_STARTED if config.SESSION_STARTED else 0
+    _say("Session cost")
+    _say(f"  elapsed        {_duration(elapsed)}")
+    _say(f"  model time     {_duration(config.SESSION_SECONDS)}")
+    _say(f"  tokens         {config.SESSION_TOKENS:,} "
+         f"(peak {config.SESSION_PEAK:,} in one turn)")
+    _say(f"  turns          {config.SESSION_TURNS}")
+
+
+def ollama_models() -> list:
+    """Names from `ollama list`. Raises if Ollama cannot be reached."""
+    import ollama
+    return sorted(m["model"] for m in ollama.list()["models"])
+
+
+def _same_model(a: str, b: str) -> bool:
+    return a == b or a.split(":")[0] == b.split(":")[0] and \
+        "latest" in (a.partition(":")[2] or "latest", b.partition(":")[2] or "latest")
+
+
+def _model(args):
+    if args:
+        config.MODEL = args
+        _say(f"model: {config.MODEL}")
+        return
+    try:
+        names = ollama_models()
+    except Exception as error:
+        _say(f"model: {config.MODEL}  (could not list Ollama models: {error})")
+        return
+    for name in names:
+        mark = "*" if _same_model(name, config.MODEL) else " "
+        _say(f"  {mark} {name}")
+    if not any(_same_model(name, config.MODEL) for name in names):
+        _say(f"  current model {config.MODEL} is not in this list")
+
+
 register("help", "list every command (this list)", _help)
 register("clear", "new conversation and session; every reset", _clear)
 register("resume", "switch to a saved session (pick from a list)", _resume,
@@ -396,3 +446,7 @@ register("rules", "global, injected, held and broken rules", _rules,
 register("skills", "skills, which are loaded, and invocations", _skills,
          group="Project")
 register("hooks", "configured hooks by event", _hooks, group="Project")
+register("cost", "elapsed time, model time, tokens and turns", _cost,
+         group="Agent")
+register("model", "list Ollama models, or switch to one", _model,
+         args="[name]", group="Agent")

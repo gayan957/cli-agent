@@ -165,13 +165,19 @@ def run(task, verbose=True, context=None, history=None):
         config.PEAK_TOKENS = max(config.PEAK_TOKENS, ctx.estimate(messages))
         stats["peak_tokens"] = config.PEAK_TOKENS
 
+        # /cost: tokens sent and time spent waiting on the model.
+        config.SESSION_TOKENS += ctx.estimate(messages)
+        asked = time.time()
         try:
             reply = _skill_aliases(llm.chat(messages, tools=schemas), tools)
         except Exception as error:
+            config.SESSION_SECONDS += time.time() - asked
             if verbose:
                 console.print(f"[red]  LLM error: {error}[/red]")
             stats["tool_failures"] += 1
             break
+
+        config.SESSION_SECONDS += time.time() - asked
 
         # Ollama re-validates history and requires each tool call as
         # {"function": {"name": ..., "arguments": ...}}. Sending our
@@ -302,5 +308,7 @@ def run(task, verbose=True, context=None, history=None):
                 f"[/yellow]")
 
     ctx.remember(messages)          # for /context and /compact
+    config.SESSION_TURNS += 1
+    config.SESSION_PEAK = max(config.SESSION_PEAK, stats["peak_tokens"])
     stats["seconds"] = round(time.time() - started, 1)
     return stats
