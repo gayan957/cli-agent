@@ -170,7 +170,11 @@ def restore(data: dict) -> list:
     """Make *data* the current session: same SESSION_ID (so snapshots stay
     together), its model, mode, todos and counters. Returns its messages."""
     snapshots.continue_session(data["session_id"])
-    config.SESSION_STARTED = time.time()
+    # Elapsed carries on from the earlier sitting (created to last save),
+    # leaving out the time the terminal was closed.
+    earlier = max(0.0, float(data.get("updated") or 0)
+                  - float(data.get("created") or 0))
+    config.SESSION_STARTED = time.time() - earlier
     config.MODEL = data.get("model") or config.MODEL
     if data.get("mode"):
         config.MODE = data["mode"]

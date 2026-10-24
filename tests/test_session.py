@@ -258,3 +258,15 @@ def test_agent_accumulates_session_cost(monkeypatch):
     assert config.SESSION_TURNS == 2
     assert config.SESSION_TOKENS > 0
     assert config.SESSION_PEAK > 0
+
+
+def test_resumed_elapsed_carries_on(monkeypatch):
+    session.save(CONVERSATION)
+    path = session.path_for(config.SESSION_ID)
+    data = json.loads(open(path).read())
+    data["created"], data["updated"] = 1000.0, 1600.0      # a 10-minute sitting
+    data["seconds"] = 300.0
+    session.restore(data)
+    elapsed = session.time.time() - config.SESSION_STARTED
+    assert 600 <= elapsed < 610
+    assert elapsed >= config.SESSION_SECONDS
