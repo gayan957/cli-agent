@@ -146,3 +146,13 @@ def step_dir(step, session=None):
     """The folder holding one step's snapshot."""
     return os.path.join(_session_dir(session or latest_session() or ""),
                         f"{step:04d}")
+
+
+def continue_session(session_id):
+    """Resume *session_id*: keep its id and carry on numbering after its
+    highest snapshot step, so resumed edits never reuse an old step."""
+    global _step
+    config.SESSION_ID = session_id
+    _step = max((number for number, _ in list_snapshots(session_id)),
+                default=0)
+    return session_id

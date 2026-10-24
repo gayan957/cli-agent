@@ -7,6 +7,7 @@ import sys
 
 from va_agent.core import config
 from va_agent.core import context
+from va_agent.core import session
 from va_agent.core import agent
 from va_agent.core.agent import run
 from va_agent.harness import hooks, permissions, rules, skills, snapshots
@@ -321,6 +322,8 @@ def _submit(task, extra=None):
         return
     summary(run(task, context=(extra or [])
                 + hooks.context_messages("UserPromptSubmit", check)))
+    # After every turn, so an uncleanly closed terminal loses nothing.
+    session.save(context.last_messages)
 
 
 def main(argv=None):
@@ -333,7 +336,7 @@ def main(argv=None):
     skills.reset_skills()
     context.load_memory()
     context.reset_context()
-    snapshots.new_session()
+    session.reset_session_state()   # new SESSION_ID, shared with snapshots
     if mode:
         config.MODE = mode          # the flag beats settings.json
     banner(config.SANDBOX, config.MODEL, config.MODE)

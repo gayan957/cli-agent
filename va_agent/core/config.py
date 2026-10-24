@@ -84,6 +84,14 @@ CLAUDE_MD = ""               # loaded project memory
 COMPACT_ATTEMPTS = 0         # consecutive ineffective compactions
 PEAK_TOKENS = 0
 
+# Sessions (Phase 9). See core/session.py.
+SESSION_DIR = ".va/sessions"
+SESSION_STARTED = 0.0        # time.time() at session start
+SESSION_TOKENS = 0           # cumulative estimate across the session
+SESSION_SECONDS = 0.0        # cumulative model time
+SESSION_TURNS = 0            # tasks run this session, for /cost
+SESSION_PEAK = 0             # largest single-turn peak, for /cost
+
 # Which Ollama model to use.
 MODEL = os.environ.get("VA_MODEL", "qwen-coder-32k")
 

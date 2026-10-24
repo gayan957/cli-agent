@@ -50,3 +50,14 @@ def TodoWrite(todos):
     done = sum(1 for t in _todos if t["status"] == "completed")
     return (f"Todo list updated ({done}/{len(_todos)} completed):\n"
             + ui.todo_lines(_todos))
+
+
+def restore(todos):
+    """Put back a saved todo list (from a resumed session), silently
+    dropping anything that is not a valid entry."""
+    _todos.clear()
+    for item in todos or []:
+        try:
+            _todos.extend(_validate([item]))
+        except ValueError:
+            continue
